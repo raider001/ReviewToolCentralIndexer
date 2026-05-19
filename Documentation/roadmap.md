@@ -373,7 +373,7 @@ cursor has fallen outside the retention window.
 
 ## Milestone 7 — Startup Ordering, Reconciliation & Event Pruning
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** The startup sequence executes in the correct order (schema → plugin → reconcile →
 LISTEN → HTTP). Reconcile runs with bounded concurrency and per-call timeout. Old events
