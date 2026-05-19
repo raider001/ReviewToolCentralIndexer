@@ -2,6 +2,7 @@ package com.kalynx.centralindexer.plugin;
 
 import com.kalynx.centralindexer.config.AppConfig;
 import com.kalynx.centralindexer.exception.PluginLoadException;
+import com.kalynx.centralindexer.provider.BuiltInPluginRegistry;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.spi.ProviderConfig;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
@@ -104,9 +105,24 @@ public final class PluginLoader implements AutoCloseable {
         Path dir = resolvePluginsDir();
         createClassLoader(dir);
         List<ProviderPlugin> candidates = serviceDiscovery.discover(classLoader);
+        if (candidates.isEmpty()) {
+            return loadBuiltIn(dir);
+        }
         validateSinglePlugin(candidates, dir);
         validateProviderId(candidates.get(0));
         plugin = candidates.get(0);
+        return plugin;
+    }
+
+    private ProviderPlugin loadBuiltIn(Path dir) {
+        String providerId = config.getPlugin() != null ? config.getPlugin().getProviderId() : null;
+        ProviderPlugin builtIn = BuiltInPluginRegistry.create(providerId);
+        if (builtIn == null) {
+            throw new PluginLoadException(
+                    "No ProviderPlugin found in '" + dir + "' and no built-in registered for"
+                    + " provider '" + providerId + "'");
+        }
+        plugin = builtIn;
         return plugin;
     }
 
