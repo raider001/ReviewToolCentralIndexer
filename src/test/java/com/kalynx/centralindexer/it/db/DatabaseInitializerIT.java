@@ -1,9 +1,11 @@
-package com.kalynx.centralindexer.db;
+package com.kalynx.centralindexer.it.db;
 
 import com.kalynx.centralindexer.config.DatabaseConfig;
+import com.kalynx.centralindexer.db.ConnectionPool;
+import com.kalynx.centralindexer.db.DatabaseInitializer;
 import com.kalynx.centralindexer.json.GsonFactory;
-import com.kalynx.centralindexer.support.PostgresTestContainer;
-import com.kalynx.centralindexer.support.RequiresDocker;
+import com.kalynx.centralindexer.it.support.PostgresTestContainer;
+import com.kalynx.centralindexer.it.support.RequiresDocker;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;

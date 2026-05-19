@@ -1,4 +1,4 @@
-package com.kalynx.centralindexer.support;
+package com.kalynx.centralindexer.it.support;
 
 import org.junit.jupiter.api.extension.ExtendWith;
 

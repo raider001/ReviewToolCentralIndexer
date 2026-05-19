@@ -1,4 +1,4 @@
-package com.kalynx.centralindexer.support;
+package com.kalynx.centralindexer.it.support;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -92,7 +92,7 @@ public final class PostgresTestContainer implements AutoCloseable {
                     "-e", "POSTGRES_PASSWORD=" + DB_PASSWORD,
                     "-e", "POSTGRES_DB=" + DB_NAME,
                     "postgres:16"
-            ).redirectErrorStream(true).start();
+            ).redirectError(ProcessBuilder.Redirect.DISCARD).start();
 
             process.waitFor(30, TimeUnit.SECONDS);
             String id = new BufferedReader(new InputStreamReader(process.getInputStream()))

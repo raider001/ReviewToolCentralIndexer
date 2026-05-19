@@ -378,6 +378,12 @@ For teams that do not want a central server, the Review Tool desktop client cont
 
 ---
 
+## Running the Tests
+
+See [`running-tests.md`](running-tests.md) for full instructions, prerequisites, and a description of every test class.
+
+---
+
 ## Out of Scope (v1)
 
 - Multi-tenant isolation (per-repository or per-client token granularity).
