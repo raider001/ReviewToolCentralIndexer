@@ -102,7 +102,7 @@ variable substitution), connect to PostgreSQL, and create the schema from scratc
 
 ## Milestone 2 — Event Persistence
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** Events can be written to and read from PostgreSQL with correct
 per-repository sequence number assignment, deduplication, and pruning.
@@ -159,7 +159,7 @@ per-repository sequence number assignment, deduplication, and pruning.
 
 ## Milestone 3 — Plugin System
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** The indexer can discover, load, validate, and start exactly one provider plugin
 from the configured plugins directory. The plugin receives working `EventSink` and
@@ -210,7 +210,7 @@ from the configured plugins directory. The plugin receives working `EventSink` a
 
 ## Milestone 4 — HTTP Server, Routing, Auth & Health
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** The embedded HTTP server is running, routes webhook requests to the registered
 plugin handler, enforces Bearer token auth on the correct endpoints, and responds correctly
