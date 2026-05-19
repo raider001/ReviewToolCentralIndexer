@@ -326,7 +326,7 @@ to health checks.
 
 ## Milestone 6 — Client History API (`GET /events`)
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** Clients can retrieve paginated event history and receive `410 Gone` when their
 cursor has fallen outside the retention window.

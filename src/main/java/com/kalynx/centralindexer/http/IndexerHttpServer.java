@@ -7,7 +7,6 @@ import com.kalynx.centralindexer.db.EventRepository;
 import com.kalynx.centralindexer.exception.TlsConfigurationException;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
-import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
@@ -125,11 +124,7 @@ public final class IndexerHttpServer {
             server.createContext("/events/stream",
                     new AuthFilter(config.getAuth(), new SseHandler(repository, registry)));
         }
-        HttpHandler eventsStub = exchange -> {
-            exchange.sendResponseHeaders(200, -1);
-            exchange.getResponseBody().close();
-        };
-        server.createContext("/events", new AuthFilter(config.getAuth(), eventsStub));
+        server.createContext("/events", new AuthFilter(config.getAuth(), new EventsHandler(repository)));
     }
 }
 
