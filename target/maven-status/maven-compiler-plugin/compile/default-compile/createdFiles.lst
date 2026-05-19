@@ -1,0 +1,16 @@
+com\kalynx\centralindexer\config\ConfigLoader.class
+com\kalynx\centralindexer\config\PluginSettings.class
+com\kalynx\centralindexer\config\DatabaseConfig.class
+com\kalynx\centralindexer\db\ConnectionPool.class
+com\kalynx\centralindexer\config\ServerConfig.class
+com\kalynx\centralindexer\config\TlsConfig.class
+com\kalynx\centralindexer\db\DatabaseInitializer.class
+com\kalynx\centralindexer\db\ConnectionPool$ConnectionSupplier.class
+com\kalynx\centralindexer\exception\ConfigLoadException.class
+com\kalynx\centralindexer\json\GsonFactory$InstantAdapter.class
+com\kalynx\centralindexer\config\AppConfig.class
+com\kalynx\centralindexer\json\GsonFactory.class
+com\kalynx\centralindexer\config\RetryQueueConfig.class
+com\kalynx\centralindexer\exception\DataSourceException.class
+com\kalynx\centralindexer\config\AuthConfig.class
+com\kalynx\centralindexer\config\IndexerConfig.class

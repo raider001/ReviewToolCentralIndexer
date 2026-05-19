@@ -1,0 +1,14 @@
+com\kalynx\centralindexer\support\RequiresDockerConditionTest$AlwaysAvailableCondition.class
+com\kalynx\centralindexer\config\ConfigLoaderTest.class
+com\kalynx\centralindexer\support\RequiresDockerConditionTest.class
+com\kalynx\centralindexer\support\RequiresDockerConditionTest$NeverAvailableCondition.class
+com\kalynx\centralindexer\support\PostgresTestContainer$ContainerStartException.class
+com\kalynx\centralindexer\support\RequiresDocker.class
+com\kalynx\centralindexer\db\ConnectionPoolTest.class
+com\kalynx\centralindexer\support\PostgresTestContainerIT.class
+com\kalynx\centralindexer\json\GsonFactoryTest.class
+com\kalynx\centralindexer\json\GsonFactoryTest$NullFieldHolder.class
+com\kalynx\centralindexer\support\RequiresDockerCondition.class
+com\kalynx\centralindexer\db\ConnectionPoolIT.class
+com\kalynx\centralindexer\db\DatabaseInitializerIT.class
+com\kalynx\centralindexer\support\PostgresTestContainer.class
