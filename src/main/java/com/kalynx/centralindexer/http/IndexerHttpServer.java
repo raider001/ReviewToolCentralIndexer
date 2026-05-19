@@ -1,22 +1,14 @@
 package com.kalynx.centralindexer.http;
 
 import com.kalynx.centralindexer.config.AppConfig;
-import com.kalynx.centralindexer.config.TlsConfig;
 import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.EventRepository;
 import com.kalynx.centralindexer.exception.TlsConfigurationException;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
 import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
 
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.security.KeyStore;
 import java.util.concurrent.Executors;
 
 /**
@@ -31,8 +23,8 @@ import java.util.concurrent.Executors;
  * </ul>
  *
  * <p>When {@code server.tls.enabled} is {@code false} or the {@code tls} block is absent,
- * a plain {@link HttpServer} is used. When {@code true}, an {@link HttpsServer} is
- * configured from the supplied keystore (behavior 4.10; full test coverage in Milestone 9).
+ * a plain {@link HttpServer} is used. When {@code true}, an {@code HttpsServer} is
+ * configured by {@link TlsConfigurator} from the supplied keystore.
  */
 public final class IndexerHttpServer {
 
@@ -84,36 +76,9 @@ public final class IndexerHttpServer {
     }
 
     private HttpServer createServer(AppConfig config) throws IOException {
-        int port = config.getServer().getPort();
-        TlsConfig tls = config.getServer().getTls();
-        if (tls != null && tls.isEnabled()) {
-            return createHttpsServer(port, tls);
-        }
-        return HttpServer.create(new InetSocketAddress(port), 0);
-    }
-
-    private HttpsServer createHttpsServer(int port, TlsConfig tls) throws IOException {
-        try {
-            KeyStore ks = KeyStore.getInstance(tls.getKeystoreType());
-            char[] password = tls.getKeystorePassword().toCharArray();
-            try (FileInputStream fis = new FileInputStream(tls.getKeystorePath())) {
-                ks.load(fis, password);
-            }
-            KeyManagerFactory kmf = KeyManagerFactory.getInstance(
-                    KeyManagerFactory.getDefaultAlgorithm());
-            kmf.init(ks, password);
-            SSLContext sslContext = SSLContext.getInstance("TLS");
-            sslContext.init(kmf.getKeyManagers(), null, null);
-            HttpsServer httpsServer = HttpsServer.create(new InetSocketAddress(port), 0);
-            httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-            return httpsServer;
-        } catch (IOException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new TlsConfigurationException(
-                    "Failed to configure TLS with keystore '" + tls.getKeystorePath() + "': "
-                    + e.getMessage(), e);
-        }
+        return TlsConfigurator.createServer(
+                config.getServer().getPort(),
+                config.getServer().getTls());
     }
 
     private void registerHandlers(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
