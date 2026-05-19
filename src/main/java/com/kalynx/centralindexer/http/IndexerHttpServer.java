@@ -3,8 +3,10 @@ package com.kalynx.centralindexer.http;
 import com.kalynx.centralindexer.config.AppConfig;
 import com.kalynx.centralindexer.config.TlsConfig;
 import com.kalynx.centralindexer.db.ConnectionPool;
+import com.kalynx.centralindexer.db.EventRepository;
 import com.kalynx.centralindexer.exception.TlsConfigurationException;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
+import com.kalynx.centralindexer.sse.PublisherRegistry;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
@@ -41,17 +43,20 @@ public final class IndexerHttpServer {
      * Creates and configures the HTTP(S) server. Does not start accepting connections until
      * {@link #start()} is called.
      *
-     * @param config the application configuration
-     * @param pool   the connection pool for health checks
-     * @param router the webhook router populated by the provider plugin
+     * @param config     the application configuration
+     * @param pool       the connection pool for health checks
+     * @param router     the webhook router populated by the provider plugin
+     * @param repository the event repository for SSE replay and cursor validation
+     * @param registry   the publisher registry for live SSE fan-out
      * @throws IOException                if the server socket cannot be bound
      * @throws TlsConfigurationException  if TLS is enabled and the keystore cannot be loaded
      */
-    public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router)
+    public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
+                             EventRepository repository, PublisherRegistry registry)
             throws IOException {
         server = createServer(config);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-        registerHandlers(config, pool, router);
+        registerHandlers(config, pool, router, repository, registry);
     }
 
     /**
@@ -112,9 +117,14 @@ public final class IndexerHttpServer {
         }
     }
 
-    private void registerHandlers(AppConfig config, ConnectionPool pool, WebhookRouterImpl router) {
+    private void registerHandlers(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
+                                  EventRepository repository, PublisherRegistry registry) {
         server.createContext("/health", new HealthHandler(pool));
         server.createContext("/webhooks/", new WebhookDispatcher(router));
+        if (repository != null && registry != null) {
+            server.createContext("/events/stream",
+                    new AuthFilter(config.getAuth(), new SseHandler(repository, registry)));
+        }
         HttpHandler eventsStub = exchange -> {
             exchange.sendResponseHeaders(200, -1);
             exchange.getResponseBody().close();

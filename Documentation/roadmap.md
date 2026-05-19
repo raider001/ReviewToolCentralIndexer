@@ -266,7 +266,7 @@ to health checks.
 
 ## Milestone 5 — Live SSE Streaming
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** Connected SSE clients receive new events in real time via the per-repository
 `SubmissionPublisher` fan-out driven by the PostgreSQL `LISTEN` thread.
