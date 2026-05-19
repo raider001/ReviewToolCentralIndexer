@@ -6,6 +6,7 @@ import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.EventRepository;
 import com.kalynx.centralindexer.http.IndexerHttpServer;
 import com.kalynx.centralindexer.plugin.EventSinkImpl;
+import com.kalynx.centralindexer.plugin.RetryQueue;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.spi.ProviderConfig;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
@@ -20,6 +21,8 @@ import java.util.Map;
  *
  * <p>The order is mandated by behaviour 7.1:
  * <ol>
+ *   <li>Start the {@link RetryQueue} so in-flight events can be accepted from the
+ *       first webhook request.</li>
  *   <li>Start the provider plugin via {@link ProviderPlugin#start}.</li>
  *   <li>Run {@link ReconciliationRunner} — blocks until all per-repository calls complete
  *       or time out.</li>
@@ -28,9 +31,6 @@ import java.util.Map;
  *   <li>Create and start the {@link IndexerHttpServer} — the TCP port is only bound here,
  *       so clients cannot connect before reconciliation completes.</li>
  * </ol>
- *
- * <p>Config and connection setup (schema migration, plugin loading) are expected to be
- * completed by {@link com.kalynx.centralindexer.Main} before constructing this class.
  */
 public final class Application {
 
@@ -42,6 +42,7 @@ public final class Application {
     private final PublisherRegistry registry;
     private final ListenThread listenThread;
     private final PruneScheduler pruneScheduler;
+    private final RetryQueue retryQueue;
 
     private IndexerHttpServer server;
 
@@ -67,6 +68,7 @@ public final class Application {
         this.pruneScheduler = new PruneScheduler(repository,
                 config.getIndexer().getRetentionDays(),
                 config.getIndexer().getPruneIntervalHours());
+        this.retryQueue = new RetryQueue(config.getIndexer().getRetryQueue(), repository, registry);
     }
 
     /**
@@ -76,7 +78,8 @@ public final class Application {
      * @throws Exception if any startup step fails
      */
     public void start() throws Exception {
-        EventSinkImpl sink = new EventSinkImpl(repository, registry);
+        retryQueue.start();
+        EventSinkImpl sink = new EventSinkImpl(repository, registry, retryQueue);
         plugin.start(buildProviderConfig(), sink, router);
         new ReconciliationRunner(config, repository, plugin).run();
         listenThread.start();
@@ -86,12 +89,13 @@ public final class Application {
     }
 
     /**
-     * Stops the HTTP server, listen thread, and prune scheduler.
+     * Stops the HTTP server, retry queue, listen thread, and prune scheduler.
      */
     public void stop() {
         if (server != null) {
             server.stop();
         }
+        retryQueue.shutdown();
         listenThread.stop();
         pruneScheduler.shutdown();
     }
@@ -117,4 +121,3 @@ public final class Application {
         return new ProviderConfig("noop", Collections.emptyList(), Map.of());
     }
 }
-

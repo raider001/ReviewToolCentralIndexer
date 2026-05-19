@@ -424,7 +424,7 @@ skipped during reconciliation.
 
 ## Milestone 8 — Webhook Retry Queue
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** When PostgreSQL is temporarily unavailable during webhook delivery, events are
 held in a bounded in-memory queue and retried with exponential back-off, absorbing

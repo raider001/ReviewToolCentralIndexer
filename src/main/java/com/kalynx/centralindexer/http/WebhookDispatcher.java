@@ -1,5 +1,7 @@
 package com.kalynx.centralindexer.http;
 
+import com.kalynx.centralindexer.exception.EventQueuedForRetryException;
+import com.kalynx.centralindexer.exception.RetryQueueFullException;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -13,8 +15,15 @@ import java.util.Map;
  *
  * <p>Strips the {@code /webhooks/} prefix from the request URI path and passes the
  * remaining suffix, request headers, and body bytes to
- * {@link WebhookRouterImpl#dispatch}. Returns {@code 200 OK} when a handler is
- * registered for the suffix; {@code 404 Not Found} otherwise.
+ * {@link WebhookRouterImpl#dispatch}. Response codes:
+ * <ul>
+ *   <li>{@code 200 OK} — handler registered and event persisted immediately.</li>
+ *   <li>{@code 202 Accepted} — handler registered but DB was unavailable; event has
+ *       been queued for retry ({@link EventQueuedForRetryException} caught).</li>
+ *   <li>{@code 404 Not Found} — no handler registered for the suffix.</li>
+ *   <li>{@code 503 Service Unavailable} — retry queue is full
+ *       ({@link RetryQueueFullException} caught).</li>
+ * </ul>
  */
 public final class WebhookDispatcher implements HttpHandler {
 
@@ -37,10 +46,18 @@ public final class WebhookDispatcher implements HttpHandler {
         String suffix = path.substring(WEBHOOKS_PREFIX.length());
         Map<String, String> headers = collectHeaders(exchange);
         byte[] body = exchange.getRequestBody().readAllBytes();
-        boolean dispatched = router.dispatch(suffix, headers, body);
-        int status = dispatched ? 200 : 404;
-        exchange.sendResponseHeaders(status, -1);
-        exchange.getResponseBody().close();
+
+        try {
+            boolean dispatched = router.dispatch(suffix, headers, body);
+            int status = dispatched ? 200 : 404;
+            exchange.sendResponseHeaders(status, -1);
+        } catch (EventQueuedForRetryException e) {
+            exchange.sendResponseHeaders(202, -1);
+        } catch (RetryQueueFullException e) {
+            exchange.sendResponseHeaders(503, -1);
+        } finally {
+            exchange.getResponseBody().close();
+        }
     }
 
     private Map<String, String> collectHeaders(HttpExchange exchange) {
