@@ -6,12 +6,15 @@ import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.EventRepository;
 import com.kalynx.centralindexer.http.IndexerHttpServer;
 import com.kalynx.centralindexer.plugin.EventSinkImpl;
+import com.kalynx.centralindexer.plugin.PluginLoader;
 import com.kalynx.centralindexer.plugin.RetryQueue;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.spi.ProviderConfig;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
 import com.kalynx.centralindexer.sse.ListenThread;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.Map;
@@ -33,6 +36,8 @@ import java.util.Map;
  * </ol>
  */
 public final class Application {
+
+    private static final Logger log = LoggerFactory.getLogger(Application.class);
 
     private final AppConfig config;
     private final ConnectionPool pool;
@@ -98,6 +103,39 @@ public final class Application {
         retryQueue.shutdown();
         listenThread.stop();
         pruneScheduler.shutdown();
+    }
+
+    /**
+     * Registers a JVM shutdown hook that stops all components in the mandated order
+     * defined by behaviour 10.5:
+     * <ol>
+     *   <li>Stop accepting new HTTP requests.</li>
+     *   <li>{@link PluginLoader#close()} — calls {@code plugin.stop()} then closes the
+     *       {@code URLClassLoader}.</li>
+     *   <li>{@link PruneScheduler#shutdown()}.</li>
+     *   <li>{@link RetryQueue#shutdown()}.</li>
+     *   <li>{@link ListenThread#stop()}.</li>
+     *   <li>{@link ConnectionPool#close()}.</li>
+     * </ol>
+     *
+     * @param pluginLoader the active plugin loader to shut down
+     * @param pool         the connection pool to close last
+     */
+    public void registerShutdownHook(PluginLoader pluginLoader, ConnectionPool pool) {
+        Runtime.getRuntime().addShutdownHook(Thread.ofVirtual().unstarted(() -> {
+            if (server != null) {
+                server.stop();
+            }
+            try {
+                pluginLoader.close();
+            } catch (Exception e) {
+                log.warn("Error stopping plugin during shutdown", e);
+            }
+            pruneScheduler.shutdown();
+            retryQueue.shutdown();
+            listenThread.stop();
+            pool.close();
+        }));
     }
 
     /**

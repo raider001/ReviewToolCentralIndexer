@@ -470,7 +470,7 @@ transient outages so providers do not start their 24-hour retry clock unnecessar
 
 ## Milestone 9 — TLS Support
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** The HTTP server can optionally terminate TLS directly using a configured keystore,
 enabling operators who expose the indexer on a public interface without a reverse proxy.
@@ -511,7 +511,7 @@ enabling operators who expose the indexer on a public interface without a revers
 
 ## Milestone 10 — Deployment Packaging & System Test
 
-> **Status: 🔲 Not Started**
+> **Status: ✅ Complete**
 
 **Goal:** The application is packaged as a Docker image with a `docker-compose.yml` that
 brings up the indexer and PostgreSQL together. A full end-to-end system test confirms the

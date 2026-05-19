@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: indexer
+    restart: unless-stopped
+
+  indexer:
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./plugins:/app/plugins
+      - ./config.json:/app/config.json
+    depends_on:
+      - postgres
+    restart: unless-stopped
+

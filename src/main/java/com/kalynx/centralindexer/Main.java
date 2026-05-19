@@ -57,6 +57,7 @@ public final class Main {
 
             Application app = new Application(config, pool, repository, plugin, router, registry);
             app.start();
+            app.registerShutdownHook(pluginLoader, pool);
             log.info("Central Indexer started on port {}", app.getPort());
         } catch (Exception e) {
             log.error("Fatal startup error — exiting", e);
