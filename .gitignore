@@ -1,0 +1,4 @@
+*.class
+TEST*.xml
+*.lst
+*Test*txt
