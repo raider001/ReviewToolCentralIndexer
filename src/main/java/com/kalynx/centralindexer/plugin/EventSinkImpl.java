@@ -6,6 +6,8 @@ import com.kalynx.centralindexer.exception.RetryQueueFullException;
 import com.kalynx.centralindexer.model.ReviewEvent;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
 
@@ -29,6 +31,8 @@ import java.sql.SQLException;
  * </ul>
  */
 public final class EventSinkImpl implements EventSink {
+
+    private static final Logger log = LoggerFactory.getLogger(EventSinkImpl.class);
 
     private final EventRepository repository;
     private final PublisherRegistry publisherRegistry;
@@ -74,7 +78,15 @@ public final class EventSinkImpl implements EventSink {
     @Override
     public void submit(ReviewEvent event) {
         try {
-            repository.insert(event).ifPresent(publisherRegistry::publish);
+            repository.insert(event).ifPresentOrElse(
+                stored -> {
+                    log.info("Event persisted and published: type='{}' repo='{}' reviewId='{}' seq={}",
+                            stored.eventType(), stored.repository(), stored.reviewId(), stored.sequenceNo());
+                    publisherRegistry.publish(stored);
+                },
+                () -> log.info("Duplicate event ignored: deliveryId='{}' repo='{}'",
+                        event.deliveryId(), event.repository())
+            );
         } catch (SQLException e) {
             handleSqlException(e, event);
         } catch (InterruptedException e) {

@@ -57,7 +57,10 @@ public final class GitHubWebhookHandler implements WebhookHandler {
     @Override
     public void handle(Map<String, String> headers, byte[] rawBody) {
         String event = headers.getOrDefault("x-github-event", headers.get("X-GitHub-Event"));
+        String deliveryId = headers.getOrDefault("x-github-delivery", headers.get("X-GitHub-Delivery"));
+
         if (!"push".equals(event)) {
+            log.debug("Ignoring GitHub event type '{}' (delivery='{}')", event, deliveryId);
             return;
         }
 
@@ -74,22 +77,27 @@ public final class GitHubWebhookHandler implements WebhookHandler {
             return;
         }
 
-        String deliveryId = headers.getOrDefault(
-                "x-github-delivery", headers.get("X-GitHub-Delivery"));
         String ref = json.get("ref").getAsString();
         String afterHash = json.has("after") ? json.get("after").getAsString() : null;
         String actorUser = json.has("pusher")
                 ? json.getAsJsonObject("pusher").get("name").getAsString() : null;
         Instant timestamp = extractTimestamp(json);
 
+        log.info("GitHub push: repo='{}' ref='{}' actor='{}' delivery='{}'",
+                repoFullName, ref, actorUser, deliveryId);
+
         ParsedRef parsed = ReviewRefParser.parse(ref);
         if (parsed == null) {
+            log.debug("Push ref '{}' on '{}' does not match a review ref — ignored", ref, repoFullName);
             return;
         }
 
         ReviewEvent reviewEvent = buildEvent(parsed, repoFullName, actorUser,
                 timestamp, afterHash, deliveryId);
         if (reviewEvent != null) {
+            log.info("Submitting event: type='{}' repo='{}' reviewId='{}' delivery='{}'",
+                    reviewEvent.eventType(), reviewEvent.repository(),
+                    reviewEvent.reviewId(), deliveryId);
             submit(reviewEvent);
         }
     }
@@ -145,4 +153,3 @@ public final class GitHubWebhookHandler implements WebhookHandler {
         return config.properties().getOrDefault("webhookSecret", "");
     }
 }
-

@@ -8,6 +8,9 @@ import com.kalynx.centralindexer.sse.PublisherRegistry;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -46,6 +49,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class SseHandler implements HttpHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(SseHandler.class);
     private static final String PARAM_REPOSITORY = "repository";
     private static final String PARAM_SINCE = "since";
     private static final String HEADER_LAST_EVENT_ID = "Last-Event-ID";
@@ -75,10 +79,13 @@ public final class SseHandler implements HttpHandler {
         }
 
         long since = parseSince(exchange);
+        String clientAddress = exchange.getRemoteAddress().toString();
 
         if (since > 0) {
             try {
                 if (!eventRepository.hasEventAt(repo, since)) {
+                    log.warn("SSE client {} requested cursor {} for '{}' which is outside the retention window",
+                            clientAddress, since, repo);
                     sendError(exchange, 410, "{\"error\":\"Cursor is outside the retention window\"}");
                     return;
                 }
@@ -93,21 +100,29 @@ public final class SseHandler implements HttpHandler {
         exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
         exchange.sendResponseHeaders(200, 0);
 
+        log.info("SSE client connected: address='{}' repo='{}' since={}", clientAddress, repo, since);
         try (OutputStream out = exchange.getResponseBody()) {
             replayStoredEvents(out, repo, since);
             streamLiveEvents(out, repo);
         } catch (Exception e) {
-            // client disconnected or interrupted — normal SSE lifecycle
+            log.debug("SSE stream closed for client '{}' repo='{}': {}", clientAddress, repo, e.getMessage());
+        } finally {
+            log.info("SSE client disconnected: address='{}' repo='{}'", clientAddress, repo);
         }
     }
 
     private void replayStoredEvents(OutputStream out, String repo, long since) throws Exception {
         List<ReviewEvent> stored = eventRepository.queryEvents(repo, since, Integer.MAX_VALUE);
+        if (!stored.isEmpty()) {
+            log.info("Replaying {} stored event(s) for repo='{}' since={}", stored.size(), repo, since);
+        }
         for (ReviewEvent event : stored) {
             writeSseFrame(out, event);
         }
         out.flush();
     }
+
+    private static final byte[] KEEP_ALIVE_FRAME = ":\n\n".getBytes(StandardCharsets.UTF_8);
 
     private void streamLiveEvents(OutputStream out, String repo) throws Exception {
         SseSubscriber subscriber = new SseSubscriber();
@@ -116,7 +131,12 @@ public final class SseHandler implements HttpHandler {
             while (!Thread.currentThread().isInterrupted()) {
                 ReviewEvent event = subscriber.pollEvent(1, TimeUnit.SECONDS);
                 if (event == null) {
-                    break;
+                    if (subscriber.isTerminated()) {
+                        break;
+                    }
+                    out.write(KEEP_ALIVE_FRAME);
+                    out.flush();
+                    continue;
                 }
                 writeSseFrame(out, event);
                 out.flush();
@@ -178,6 +198,7 @@ public final class SseHandler implements HttpHandler {
         private static final Object TERMINAL = new Object();
         private final LinkedBlockingQueue<Object> queue = new LinkedBlockingQueue<>();
         private volatile Flow.Subscription subscription;
+        private volatile boolean terminated = false;
 
         @Override
         public void onSubscribe(Flow.Subscription s) {
@@ -192,11 +213,13 @@ public final class SseHandler implements HttpHandler {
 
         @Override
         public void onError(Throwable t) {
+            terminated = true;
             queue.offer(TERMINAL);
         }
 
         @Override
         public void onComplete() {
+            terminated = true;
             queue.offer(TERMINAL);
         }
 
@@ -206,6 +229,10 @@ public final class SseHandler implements HttpHandler {
                 return null;
             }
             return (ReviewEvent) item;
+        }
+
+        boolean isTerminated() {
+            return terminated;
         }
 
         void cancel() {

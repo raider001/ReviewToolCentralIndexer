@@ -1,0 +1,35 @@
+{
+  "server": {
+    "port": 8765
+  },
+  "auth": {
+    "enabled": true,
+    "bearerToken": "${BEARER_TOKEN}"
+  },
+  "database": {
+    "url": "jdbc:postgresql://postgres:5432/indexer",
+    "user": "postgres",
+    "password": "${POSTGRES_PASSWORD}",
+    "poolSize": 20
+  },
+  "indexer": {
+    "retentionDays": 7,
+    "pluginsDir": "./plugins",
+    "reconcileConcurrency": 50,
+    "reconcileTimeoutSeconds": 10,
+    "pruneIntervalHours": 6,
+    "retryQueue": {
+      "maxDepth": 1000,
+      "maxRetryMinutes": 5
+    }
+  },
+  "plugin": {
+    "providerId": "github",
+    "properties": {
+      "webhookSecret": "banana",
+      "apiToken": "${GITHUB_API_TOKEN}"
+    }
+  },
+  "repositories": []
+}
+

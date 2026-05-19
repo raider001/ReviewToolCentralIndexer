@@ -10,6 +10,10 @@ services:
     build: .
     ports:
       - "8765:8765"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      BEARER_TOKEN: ${BEARER_TOKEN}
+      GITHUB_API_TOKEN: ${GITHUB_API_TOKEN}
     volumes:
       - ./plugins:/app/plugins
       - ./config.json:/app/config.json
