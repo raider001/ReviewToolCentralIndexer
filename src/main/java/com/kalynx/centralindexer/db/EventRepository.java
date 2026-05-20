@@ -53,6 +53,10 @@ public final class EventRepository {
             "SELECT sequence_no, repository, event_type, review_id, actor_user, payload, timestamp, delivery_id " +
             "FROM events WHERE repository = ? AND sequence_no > ? ORDER BY sequence_no ASC LIMIT ?";
 
+    private static final String SQL_QUERY_ALL_EVENTS =
+            "SELECT sequence_no, repository, event_type, review_id, actor_user, payload, timestamp, delivery_id " +
+            "FROM events ORDER BY timestamp ASC, sequence_no ASC LIMIT ?";
+
     private static final String SQL_QUERY_REPO_STATES =
             "SELECT repository, last_sequence_no, last_event_time FROM repository_state";
 
@@ -137,6 +141,31 @@ public final class EventRepository {
             ps.setString(1, repository);
             ps.setLong(2, since);
             ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<ReviewEvent> events = new ArrayList<>();
+                while (rs.next()) {
+                    events.add(mapRowToEvent(rs));
+                }
+                return events;
+            }
+        } finally {
+            pool.release(conn);
+        }
+    }
+
+    /**
+     * Returns up to {@code limit} events across all repositories, ordered ascending by
+     * {@code timestamp} then {@code sequence_no}. Intended for wildcard SSE replay.
+     *
+     * @param limit the maximum number of events to return
+     * @return a list of matching events, possibly empty
+     * @throws SQLException         if the query fails
+     * @throws InterruptedException if the thread is interrupted while waiting for a connection
+     */
+    public List<ReviewEvent> queryAllEvents(int limit) throws SQLException, InterruptedException {
+        Connection conn = pool.acquire();
+        try (PreparedStatement ps = conn.prepareStatement(SQL_QUERY_ALL_EVENTS)) {
+            ps.setInt(1, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 List<ReviewEvent> events = new ArrayList<>();
                 while (rs.next()) {

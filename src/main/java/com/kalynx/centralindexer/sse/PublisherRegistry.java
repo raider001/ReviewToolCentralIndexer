@@ -25,6 +25,7 @@ public final class PublisherRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(PublisherRegistry.class);
     private static final int BUFFER_CAPACITY = 8;
+    static final String WILDCARD_REPO = "*";
 
     private final ConcurrentHashMap<String, PublisherEntry> entries = new ConcurrentHashMap<>();
 
@@ -43,7 +44,18 @@ public final class PublisherRegistry {
     }
 
     /**
-     * Publishes {@code event} to all SSE subscribers watching {@code event.repository()}.
+     * Subscribes {@code subscriber} to all events across every repository.
+     * The subscriber will receive events published for any repository.
+     *
+     * @param subscriber the subscriber to receive events; must not be {@code null}
+     */
+    public void subscribeAll(Flow.Subscriber<? super ReviewEvent> subscriber) {
+        subscribe(WILDCARD_REPO, subscriber);
+    }
+
+    /**
+     * Publishes {@code event} to all SSE subscribers watching {@code event.repository()},
+     * and also to any wildcard subscribers registered via {@link #subscribeAll}.
      *
      * <p>If no publisher exists for the repository the call is a no-op. A subscriber whose
      * buffer is full is dropped via {@link Flow.Subscriber#onError}.
@@ -51,15 +63,8 @@ public final class PublisherRegistry {
      * @param event the event to fan out; must not be {@code null}
      */
     public void publish(ReviewEvent event) {
-        PublisherEntry entry = entries.get(event.repository());
-        if (entry != null) {
-            entry.publisher.offer(event, (sub, item) -> {
-                log.warn("Slow SSE subscriber dropped for repository '{}'", event.repository());
-                sub.onError(new IllegalStateException(
-                        "SSE buffer capacity exceeded for repository: " + event.repository()));
-                return false;
-            });
-        }
+        offerToEntry(entries.get(event.repository()), event);
+        offerToEntry(entries.get(WILDCARD_REPO), event);
     }
 
     /**
@@ -77,6 +82,18 @@ public final class PublisherRegistry {
                 entry.publisher.close();
             }
         }
+    }
+
+    private void offerToEntry(PublisherEntry entry, ReviewEvent event) {
+        if (entry == null) {
+            return;
+        }
+        entry.publisher.offer(event, (sub, item) -> {
+            log.warn("Slow SSE subscriber dropped for repository '{}'", event.repository());
+            sub.onError(new IllegalStateException(
+                    "SSE buffer capacity exceeded for repository: " + event.repository()));
+            return false;
+        });
     }
 
     private static final class PublisherEntry {

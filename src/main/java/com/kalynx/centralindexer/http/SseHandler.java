@@ -22,6 +22,12 @@ import java.util.concurrent.TimeUnit;
 /**
  * Handles {@code GET /events/stream?repository=<repo>&since=<n>}.
  *
+ * <p>Passing {@code repository=*} subscribes to all repositories at once. In that mode
+ * cursor validation and per-repository replay are skipped; the server replays all stored
+ * events within the retention window and then streams live events for every repository.
+ * This allows a single persistent connection regardless of how many repositories the
+ * client monitors.
+ *
  * <p>On a valid request the handler:
  * <ol>
  *   <li>Optionally validates the cursor via {@link EventRepository#hasEventAt} when
@@ -53,6 +59,7 @@ public final class SseHandler implements HttpHandler {
     private static final String PARAM_REPOSITORY = "repository";
     private static final String PARAM_SINCE = "since";
     private static final String HEADER_LAST_EVENT_ID = "Last-Event-ID";
+    private static final String WILDCARD_REPO = "*";
 
     private final EventRepository eventRepository;
     private final PublisherRegistry registry;
@@ -75,6 +82,11 @@ public final class SseHandler implements HttpHandler {
         String repo = getParam(exchange, PARAM_REPOSITORY);
         if (repo == null) {
             sendError(exchange, 400, "{\"error\":\"repository parameter is required\"}");
+            return;
+        }
+
+        if (WILDCARD_REPO.equals(repo)) {
+            handleWildcard(exchange);
             return;
         }
 
@@ -111,6 +123,34 @@ public final class SseHandler implements HttpHandler {
         }
     }
 
+    private void handleWildcard(HttpExchange exchange) throws IOException {
+        String clientAddress = exchange.getRemoteAddress().toString();
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+        exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
+        exchange.sendResponseHeaders(200, 0);
+        log.info("SSE wildcard client connected: address='{}'", clientAddress);
+        try (OutputStream out = exchange.getResponseBody()) {
+            replayAllStoredEvents(out);
+            streamLiveEvents(out, WILDCARD_REPO);
+        } catch (Exception e) {
+            log.debug("SSE wildcard stream closed for client '{}': {}", clientAddress, e.getMessage());
+        } finally {
+            log.info("SSE wildcard client disconnected: address='{}'", clientAddress);
+        }
+    }
+
+    private void replayAllStoredEvents(OutputStream out) throws Exception {
+        List<ReviewEvent> stored = eventRepository.queryAllEvents(Integer.MAX_VALUE);
+        if (!stored.isEmpty()) {
+            log.info("Replaying {} stored event(s) for wildcard subscription", stored.size());
+        }
+        for (ReviewEvent event : stored) {
+            writeSseFrame(out, event);
+        }
+        out.flush();
+    }
+
     private void replayStoredEvents(OutputStream out, String repo, long since) throws Exception {
         List<ReviewEvent> stored = eventRepository.queryEvents(repo, since, Integer.MAX_VALUE);
         if (!stored.isEmpty()) {
@@ -126,7 +166,11 @@ public final class SseHandler implements HttpHandler {
 
     private void streamLiveEvents(OutputStream out, String repo) throws Exception {
         SseSubscriber subscriber = new SseSubscriber();
-        registry.subscribe(repo, subscriber);
+        if (WILDCARD_REPO.equals(repo)) {
+            registry.subscribeAll(subscriber);
+        } else {
+            registry.subscribe(repo, subscriber);
+        }
         try {
             while (!Thread.currentThread().isInterrupted()) {
                 ReviewEvent event = subscriber.pollEvent(1, TimeUnit.SECONDS);
