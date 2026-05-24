@@ -10,6 +10,7 @@ import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.RepositoriesRepository;
 import com.kalynx.centralindexer.db.ReviewsIndexRepository;
 import com.kalynx.centralindexer.http.IndexerHttpServer;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.plugin.EventSinkImpl;
 import com.kalynx.centralindexer.plugin.PluginLoader;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
@@ -42,6 +43,7 @@ public final class Application {
     private final ProviderPlugin plugin;
     private final WebhookRouterImpl router;
     private final PublisherRegistry registry;
+    private final MetricsCollector metrics;
 
     private IndexerHttpServer server;
 
@@ -53,14 +55,17 @@ public final class Application {
      * @param plugin   the provider plugin, already loaded and validated
      * @param router   the webhook router
      * @param registry the SSE publisher registry
+     * @param metrics  the metrics collector
      */
     public Application(AppConfig config, ConnectionPool pool, ProviderPlugin plugin,
-                       WebhookRouterImpl router, PublisherRegistry registry) {
+                       WebhookRouterImpl router, PublisherRegistry registry,
+                       MetricsCollector metrics) {
         this.config = config;
         this.pool = pool;
         this.plugin = plugin;
         this.router = router;
         this.registry = registry;
+        this.metrics = metrics;
     }
 
     /**
@@ -96,7 +101,7 @@ public final class Application {
         log.info("Watching '{}' for repository additions", reposFilePath.toAbsolutePath());
 
         server = new IndexerHttpServer(config, pool, router, registry, branchRepository,
-                reviewsRepository, repositoriesRepository);
+                reviewsRepository, repositoriesRepository, metrics);
         server.start();
     }
 
@@ -115,13 +120,16 @@ public final class Application {
      *   <li>Stop accepting new HTTP requests.</li>
      *   <li>{@link PluginLoader#close()} — calls {@code plugin.stop()} then closes the
      *       {@code URLClassLoader}.</li>
+     *   <li>{@link MetricsCollector#stop()} — stops the background sampler.</li>
      *   <li>{@link ConnectionPool#close()}.</li>
      * </ol>
      *
      * @param pluginLoader the active plugin loader to shut down
      * @param pool         the connection pool to close last
+     * @param metrics      the metrics collector whose sampler should be stopped
      */
-    public void registerShutdownHook(PluginLoader pluginLoader, ConnectionPool pool) {
+    public void registerShutdownHook(PluginLoader pluginLoader, ConnectionPool pool,
+                                     MetricsCollector metrics) {
         Runtime.getRuntime().addShutdownHook(Thread.ofVirtual().unstarted(() -> {
             if (server != null) {
                 server.stop();
@@ -130,6 +138,9 @@ public final class Application {
                 pluginLoader.close();
             } catch (Exception e) {
                 log.warn("Error stopping plugin during shutdown", e);
+            }
+            if (metrics != null) {
+                metrics.stop();
             }
             pool.close();
         }));

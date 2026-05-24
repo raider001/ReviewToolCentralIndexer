@@ -39,32 +39,43 @@ public final class IndexerHttpServer {
 
     /**
      * Convenience overload that skips the {@code /branches} and {@code /reviews} contexts.
-     * Equivalent to {@code IndexerHttpServer(config, pool, router, registry, null, null)}.
      */
     public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
                              PublisherRegistry registry) throws IOException {
-        this(config, pool, router, registry, null, null);
+        this(config, pool, router, registry, null, null, null, new MetricsCollector(pool));
     }
 
     /**
      * Convenience overload that skips the {@code /reviews} context.
-     * Equivalent to {@code IndexerHttpServer(config, pool, router, registry, branchRepository, null)}.
      */
     public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
                              PublisherRegistry registry, BranchRepository branchRepository)
             throws IOException {
-        this(config, pool, router, registry, branchRepository, null);
+        this(config, pool, router, registry, branchRepository, null, null, new MetricsCollector(pool));
     }
 
     /**
      * Convenience overload that skips the {@code /repositories} context.
-     * Equivalent to {@code IndexerHttpServer(config, pool, router, registry, branchRepository, reviewsRepository, null)}.
      */
     public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
                              PublisherRegistry registry, BranchRepository branchRepository,
                              ReviewsIndexRepository reviewsRepository)
             throws IOException {
-        this(config, pool, router, registry, branchRepository, reviewsRepository, null);
+        this(config, pool, router, registry, branchRepository, reviewsRepository, null,
+                new MetricsCollector(pool));
+    }
+
+    /**
+     * Convenience overload with a caller-supplied {@link MetricsCollector} and no
+     * {@code /repositories} context.
+     */
+    public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
+                             PublisherRegistry registry, BranchRepository branchRepository,
+                             ReviewsIndexRepository reviewsRepository,
+                             RepositoriesRepository repositoriesRepository)
+            throws IOException {
+        this(config, pool, router, registry, branchRepository, reviewsRepository,
+                repositoriesRepository, new MetricsCollector(pool));
     }
 
     /**
@@ -82,18 +93,20 @@ public final class IndexerHttpServer {
      *                                 registering the {@code /reviews} endpoint
      * @param repositoriesRepository   the repositories repository; may be {@code null} to skip
      *                                 registering the {@code /repositories} endpoint
+     * @param metrics                  the metrics collector shared with the GUI (if running)
      * @throws IOException               if the server socket cannot be bound
      * @throws TlsConfigurationException if TLS is enabled and the keystore cannot be loaded
      */
     public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
                              PublisherRegistry registry, BranchRepository branchRepository,
                              ReviewsIndexRepository reviewsRepository,
-                             RepositoriesRepository repositoriesRepository)
+                             RepositoriesRepository repositoriesRepository,
+                             MetricsCollector metrics)
             throws IOException {
         server = createServer(config);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         registerHandlers(config, pool, router, registry, branchRepository, reviewsRepository,
-                repositoriesRepository);
+                repositoriesRepository, metrics);
     }
 
     /**
@@ -130,8 +143,8 @@ public final class IndexerHttpServer {
     private void registerHandlers(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
                                   PublisherRegistry registry, BranchRepository branchRepository,
                                   ReviewsIndexRepository reviewsRepository,
-                                  RepositoriesRepository repositoriesRepository) {
-        MetricsCollector metrics = new MetricsCollector(pool);
+                                  RepositoriesRepository repositoriesRepository,
+                                  MetricsCollector metrics) {
         server.createContext("/health",   new HealthHandler(pool));
         server.createContext("/webhooks/", new WebhookDispatcher(router));
         server.createContext("/metrics",   new MetricsHandler(metrics));

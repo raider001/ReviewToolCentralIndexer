@@ -163,7 +163,7 @@ class SystemIT {
         };
 
         Application application = new Application(config, pool, plugin,
-                new WebhookRouterImpl(), new PublisherRegistry());
+                new WebhookRouterImpl(), new PublisherRegistry(), new com.kalynx.centralindexer.metrics.MetricsCollector(pool));
         application.start();
         return application;
     }

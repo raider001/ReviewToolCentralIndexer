@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Flow;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -146,7 +147,7 @@ public final class SseHandler implements HttpHandler {
         for (String param : query.split("&")) {
             String[] parts = param.split("=", 2);
             if (parts.length == 2 && parts[0].equals(name)) {
-                return parts[1];
+                return URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
             }
         }
         return null;

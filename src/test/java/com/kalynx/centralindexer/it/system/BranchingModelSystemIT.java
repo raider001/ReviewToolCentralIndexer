@@ -271,7 +271,8 @@ class BranchingModelSystemIT {
         };
 
         Application application = new Application(
-                config, pool, noopPlugin, new WebhookRouterImpl(), registry);
+                config, pool, noopPlugin, new WebhookRouterImpl(), registry,
+                new com.kalynx.centralindexer.metrics.MetricsCollector(pool));
         application.start();
         return application;
     }

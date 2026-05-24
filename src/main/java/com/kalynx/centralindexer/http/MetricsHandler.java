@@ -6,6 +6,7 @@ import com.sun.net.httpserver.HttpHandler;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /**
  * Handles {@code GET /metrics}.
@@ -64,6 +65,14 @@ public final class MetricsHandler implements HttpHandler {
     }
 
     private String buildJson() {
+        List<MetricsCollector.TimeSeriesBuffer> coreBufs = metrics.getPerCoreSamples();
+        StringBuilder coreArr = new StringBuilder("[");
+        for (int i = 0; i < coreBufs.size(); i++) {
+            if (i > 0) coreArr.append(',');
+            coreArr.append(String.format("%.2f", coreBufs.get(i).average(1000)));
+        }
+        coreArr.append(']');
+
         return "{"
                 + "\"sse\":{"
                 +   "\"connected_clients_total\":" + metrics.getConnectedClients() + ","
@@ -80,6 +89,14 @@ public final class MetricsHandler implements HttpHandler {
                 + "},"
                 + "\"backfill\":{"
                 +   "\"progress_pct\":"             + metrics.getBackfillProgress()
+                + "},"
+                + "\"system\":{"
+                +   "\"cpu_percent\":"              + String.format("%.2f", metrics.getCpuSamples().average(1000)) + ","
+                +   "\"memory_mb\":"                + String.format("%.2f", metrics.getMemorySamples().average(1000)) + ","
+                +   "\"memory_max_mb\":"            + String.format("%.0f", MetricsCollector.memoryMaxMb()) + ","
+                +   "\"active_connections\":"       + String.format("%.0f", metrics.getConnectionSamples().average(1000)) + ","
+                +   "\"api_calls_last_second\":"    + metrics.getApiCallSamples().count(1000) + ","
+                +   "\"per_core_cpu_percent\":"     + coreArr
                 + "}"
                 + "}";
     }

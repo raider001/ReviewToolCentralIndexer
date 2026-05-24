@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.model.EventType;
 import com.kalynx.centralindexer.model.ReviewEvent;
 import com.kalynx.centralindexer.provider.common.ReviewRefParser;
@@ -141,6 +142,8 @@ public final class GitHubReconciler {
                     .build();
             HttpResponse<String> response = http.send(request,
                     HttpResponse.BodyHandlers.ofString());
+            MetricsCollector mc = MetricsCollector.getInstance();
+            if (mc != null) mc.recordProviderApiCall();
             if (response.statusCode() != 200) {
                 log.warn("GitHub Events API returned {} for {}", response.statusCode(), url);
                 return null;

@@ -112,7 +112,8 @@ public final class BranchesHandler implements HttpHandler {
             }
         }
 
-        String prefix = getParam(exchange, "q");
+        String prefix  = getParam(exchange, "q");
+        boolean detailed = "true".equalsIgnoreCase(getParam(exchange, "detailed"));
         try {
             long start = System.nanoTime();
             List<BranchRecord> records = branchRepository.query(prefix, owner, repository, limit, cursor);
@@ -121,7 +122,14 @@ public final class BranchesHandler implements HttpHandler {
                     ? encodeCursor(records.get(records.size() - 1))
                     : null;
             List<String> branchNames = records.stream().map(BranchRecord::branchName).toList();
-            sendJson(exchange, 200, gson.toJson(new BranchesResponse(branchNames, nextCursor)));
+            if (detailed) {
+                List<DetailedBranchRecord> detail = records.stream()
+                        .map(r -> new DetailedBranchRecord(r.owner(), r.repository(), r.branchName()))
+                        .toList();
+                sendJson(exchange, 200, gson.toJson(new DetailedBranchesResponse(branchNames, detail, nextCursor)));
+            } else {
+                sendJson(exchange, 200, gson.toJson(new BranchesResponse(branchNames, nextCursor)));
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             sendError(exchange, 503, "{\"error\":\"service unavailable\"}");
@@ -175,4 +183,6 @@ public final class BranchesHandler implements HttpHandler {
     }
 
     private record BranchesResponse(List<String> branches, String next_cursor) {}
+    private record DetailedBranchRecord(String owner, String repository, String branch_name) {}
+    private record DetailedBranchesResponse(List<String> branches, List<DetailedBranchRecord> branch_records, String next_cursor) {}
 }

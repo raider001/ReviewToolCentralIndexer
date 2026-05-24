@@ -1,0 +1,10 @@
+services:
+  indexer:
+    environment:
+      INDEXER_ARGS: --gui
+      # X11 display forwarding so the Swing window renders on the host.
+      # On Windows with Docker Desktop (WSL2 + WSLg) the DISPLAY is forwarded
+      # automatically. On Linux pass -e DISPLAY or set it in .env.
+      DISPLAY: ${DISPLAY:-host.docker.internal:0.0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix

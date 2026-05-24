@@ -12,7 +12,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -82,13 +84,31 @@ public final class EventSinkImpl implements EventSink {
     public void submit(ReviewEvent event) {
         log.info("Event received: type='{}' repo='{}' reviewId='{}'",
                 event.eventType(), event.repository(), event.reviewId());
-        publisherRegistry.publish(event);
+        publisherRegistry.publish(enrichWithRepoUrl(event));
         try {
             persist(event);
         } catch (Exception e) {
             log.warn("Failed to persist {} event for '{}' to DB: {}",
                     event.eventType(), event.repository(), e.getMessage());
         }
+    }
+
+    private ReviewEvent enrichWithRepoUrl(ReviewEvent event) {
+        return switch (event.eventType()) {
+            case REVIEW_CREATED, REVIEW_UPDATED, REVIEW_CLOSED,
+                 REVIEW_COMMENT_ADDED, REVIEW_COMMENT_UPDATED -> {
+                if (event.payload().containsKey("repository_url")) yield event;
+                String[] parts = splitRepo(event.repository());
+                String url = resolveRepoUrl(parts[0], parts[1]);
+                if (url == null) yield event;
+                Map<String, String> enriched = new HashMap<>(event.payload());
+                enriched.put("repository_url", url);
+                yield new ReviewEvent(event.sequenceNo(), event.timestamp(), event.repository(),
+                        event.eventType(), event.reviewId(), event.actorUser(), event.deliveryId(),
+                        enriched);
+            }
+            default -> event;
+        };
     }
 
     // -------------------------------------------------------------------------

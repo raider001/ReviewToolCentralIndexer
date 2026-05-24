@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.model.EventType;
 import com.kalynx.centralindexer.model.ReviewEvent;
 import com.kalynx.centralindexer.provider.common.ReviewRefParser;
@@ -83,6 +84,8 @@ final class GitHubBranchReconciler {
         try {
             HttpRequest request = buildRequest(url, token);
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            MetricsCollector mc = MetricsCollector.getInstance();
+            if (mc != null) mc.recordProviderApiCall();
             if (response.statusCode() == 401) {
                 log.warn("GitHub Git Refs API returned 401 Unauthorized for {} — " +
                          "verify that 'apiToken' in plugin configuration is valid and not expired", repository);
@@ -136,6 +139,8 @@ final class GitHubBranchReconciler {
         try {
             HttpRequest request = buildRequest(url, token);
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            MetricsCollector mc2 = MetricsCollector.getInstance();
+            if (mc2 != null) mc2.recordProviderApiCall();
             if (response.statusCode() != 200) {
                 log.warn("GitHub Compare API returned {} for {} ({}...{})",
                         response.statusCode(), repository,
@@ -455,6 +460,8 @@ final class GitHubBranchReconciler {
         try {
             HttpResponse<String> response = http.send(
                     buildRequest(url, token), HttpResponse.BodyHandlers.ofString());
+            MetricsCollector mc = MetricsCollector.getInstance();
+            if (mc != null) mc.recordProviderApiCall();
             if (response.statusCode() == 401) {
                 log.warn("GitHub API returned 401 Unauthorized for {} — " +
                          "verify that 'apiToken' in plugin configuration is valid and not expired", url);
