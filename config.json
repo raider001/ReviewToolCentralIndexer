@@ -7,7 +7,7 @@
     "bearerToken": "${BEARER_TOKEN}"
   },
   "database": {
-    "url": "jdbc:postgresql://postgres:5432/indexer",
+    "url": "jdbc:postgresql://${DB_HOST}:5432/indexer",
     "user": "postgres",
     "password": "${POSTGRES_PASSWORD}",
     "poolSize": 20

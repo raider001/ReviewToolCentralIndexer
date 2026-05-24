@@ -6,5 +6,5 @@ TEST*.xml
 /target/
 *.log
 # Environment variable files — contain secrets, never commit these
-.env
+debug_tools/.env
 

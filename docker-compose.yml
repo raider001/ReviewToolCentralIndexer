@@ -1,8 +1,11 @@
 services:
   postgres:
     image: postgres:16
+    ports:
+      - "5432:5432"
+    env_file:
+      - ./debug_tools/.env
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: indexer
     restart: unless-stopped
 
@@ -10,11 +13,10 @@ services:
     build: .
     ports:
       - "8765:8765"
+    env_file:
+      - ./debug_tools/.env
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      BEARER_TOKEN: ${BEARER_TOKEN}
-      GITHUB_API_TOKEN: ${GITHUB_API_TOKEN}
-      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      DB_HOST: postgres
     volumes:
       - ./plugins:/app/plugins
       - ./config.json:/app/config.json
