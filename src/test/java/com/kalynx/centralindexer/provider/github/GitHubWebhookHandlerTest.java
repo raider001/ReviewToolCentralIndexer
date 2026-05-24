@@ -84,8 +84,9 @@ class GitHubWebhookHandlerTest {
         ReviewEvent event = submitted.get(0);
         assertEquals(EventType.BRANCH_UPDATED, event.eventType());
         assertNull(event.reviewId());
-        assertEquals("main", event.payload().get("branch"));
-        assertEquals("deadbeef1234", event.payload().get("headSha"));
+        assertEquals("main", event.payload().get("branch_name"));
+        assertEquals("deadbeef1234", event.payload().get("head_commit"));
+        assertNotNull(event.payload().get("repository_url"));
     }
 
     @Test

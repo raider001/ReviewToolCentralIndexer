@@ -13,7 +13,7 @@ identifies the real triggers that would justify a more complex architecture.
 | Concurrent SSE clients | ~10,000 | Virtual threads, one per client |
 | Repositories served | ~10,000s | One `LISTEN` channel covers all |
 | Webhook ingestion rate | < 100 events/second peak | 10,000 repos × low-frequency human activity; spikes during business hours |
-| Event retention | 7 days default | Configurable; drives storage sizing |
+| Retention window (optional event archive) | N/A by default | The indexer stores only latest snapshots; an archive is optional and sized separately |
 
 ---
 
@@ -40,46 +40,30 @@ with significant headroom. **Memory becomes the first constraint above ~40,000 c
 
 ---
 
-### PostgreSQL connection pool — startup thundering herd
+### PostgreSQL connection pool — reconnect/read thundering herd
 
-The pool holds 10–20 JDBC connections shared across all virtual threads. Under normal
-operation this is never a bottleneck: webhooks are infrequent, and replay queries from
-staggered client reconnects are fast.
+The pool holds a bounded number of JDBC connections shared across virtual threads. Under
+normal operation this is not a bottleneck. With the current client connect flow, clients
+fetch a snapshot via `GET /reviews` (a read against the small `reviews_index`) and then
+open the SSE stream. If many clients reconnect at once this produces a read thundering
+herd against `reviews_index` rather than many per-repo replay `SELECT`s.
 
-**The problem case:** If the node restarts, all connected clients reconnect within
-seconds and all simultaneously issue replay queries (`SELECT WHERE sequence_no > ?`).
-With 10,000 clients and 10 pool connections:
-
-- 9,990 virtual threads queue on the pool
-- Each query takes ~1–5 ms against a warm PostgreSQL index
-- At 10 parallel queries that is ~5,000 ms / 10 = **~50 seconds to drain the queue**
-
-The node is technically correct throughout but appears slow during this window.
-
-**Mitigations (without adding nodes):**
-- Increase pool size to 50 for restart resilience (PostgreSQL handles this on modest hardware)
-- Add a jittered reconnect delay on the client side (~0–30 seconds random)
-- Prioritise new client connections; defer replay until the live path is established
+Mitigations: increase the pool size temporarily for restart windows, add jittered client
+reconnect delays, prioritise establishing live streams before full reconcilation, and
+consider a cached/read-replica for heavy reconnect bursts.
 
 ---
 
-### PostgreSQL table size at 10,000 repositories
+### Read index sizing
 
-With 10,000 repositories and a 7-day retention window:
+The indexer maintains a compact denormalized `reviews_index` (one row per active review)
+to serve `GET /reviews` with low latency. The system no longer relies on an append-only
+event table for normal operation; if you choose to run a separate event archive for
+auditing/backfill, size that component independently.
 
-| Events per repo per day | Total rows (7 days) | Assessment |
-|---|---|---|
-| 10 | ~700,000 | Trivial |
-| 100 | ~7,000,000 | Fine with proper indexing |
-| 1,000 | ~70,000,000 | Large; index maintenance becomes measurable |
-
-The `(repository, sequence_no)` unique index keeps per-repository replay queries fast
-regardless of total table size. The pruning job must run frequently enough to keep
-rows in the lower ranges above.
-
-**Table partitioning by repository is not viable at 10,000+ repositories** —
-PostgreSQL degrades with more than ~1,000 list partitions. The composite index is the
-correct strategy.
+Capacity planning should focus on the rate of upserts to `reviews_index` (writes/sec)
+and the size of each row (small JSON describing repositories/branches). Partitioning and
+per-repository strategies are no longer primary concerns for the read index.
 
 ---
 
@@ -150,11 +134,13 @@ notification channel can lag the write path.
 
 ---
 
-### `pg_notify` payload size
+### `pg_notify` payload considerations
 
-PostgreSQL limits each notification payload to **8,000 bytes**. The notification carries
-the full `ReviewEvent` serialised as JSON — no separate DB query is needed in the LISTEN
-thread. A typical event payload is ~300 bytes. The limit is never approached.
+Notifications carry small signals (e.g. `review_id`, `event_type`, routing keys and
+occasionally minimal routing fields such as `repository_url` or `head_commit`). The 8 KB
+payload limit is not a practical concern for these signals. Continue to monitor
+`pg_notify` delivery latency, which can increase above ~1k notifications/sec on some
+platforms.
 
 ---
 
@@ -210,5 +196,5 @@ simply that the triggers above have not been reached yet.
 | > 40,000 | — | — | — | Consider multi-node |
 
 These are conservative estimates with headroom. Actual memory usage depends on average
-event payload size and the configured retention window.
+signal payload size.
 

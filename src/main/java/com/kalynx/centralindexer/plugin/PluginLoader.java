@@ -135,10 +135,17 @@ public final class PluginLoader implements AutoCloseable {
      * @param sink   the event sink the plugin uses to forward events
      * @param router the router the plugin uses to register webhook endpoints
      */
-    public void start(EventSink sink, WebhookRouter router) {
+    /**
+     * Starts the loaded plugin.
+     *
+     * @param repositories canonical {@code owner/repo} identifiers to pass to the plugin
+     * @param sink         the event sink the plugin uses to forward events
+     * @param router       the router the plugin uses to register webhook endpoints
+     */
+    public void start(List<String> repositories, EventSink sink, WebhookRouter router) {
         ProviderConfig providerConfig = new ProviderConfig(
                 config.getPlugin().getProviderId(),
-                config.getRepositories(),
+                repositories,
                 config.getPlugin().getProperties());
         plugin.start(providerConfig, sink, router);
     }

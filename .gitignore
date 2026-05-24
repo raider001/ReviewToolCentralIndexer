@@ -1,4 +1,10 @@
+*.jar
 *.class
 TEST*.xml
 *.lst
 *Test*txt
+/target/
+*.log
+# Environment variable files — contain secrets, never commit these
+.env
+

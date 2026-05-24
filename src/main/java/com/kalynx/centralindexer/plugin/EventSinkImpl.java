@@ -1,8 +1,10 @@
 package com.kalynx.centralindexer.plugin;
 
-import com.kalynx.centralindexer.db.EventRepository;
-import com.kalynx.centralindexer.exception.EventQueuedForRetryException;
-import com.kalynx.centralindexer.exception.RetryQueueFullException;
+import com.kalynx.centralindexer.db.BranchRepository;
+import com.kalynx.centralindexer.db.RepositoriesRepository;
+import com.kalynx.centralindexer.db.RepositoryRecord;
+import com.kalynx.centralindexer.db.ReviewsIndexMapper;
+import com.kalynx.centralindexer.db.ReviewsIndexRepository;
 import com.kalynx.centralindexer.model.ReviewEvent;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
@@ -10,101 +12,216 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Core implementation of {@link EventSink}.
  *
- * <p>Each call to {@link #submit} persists the event via {@link EventRepository#insert}.
- * A stored event (non-empty result) is immediately forwarded to {@link PublisherRegistry}
- * for fan-out to connected SSE clients. A duplicate delivery ID results in an empty
- * Optional — nothing is published.
- *
- * <p>When a {@link RetryQueue} is configured and {@link EventRepository#insert} throws
- * {@link SQLException}, the event is offered to the retry queue:
+ * <p>Each call to {@link #submit} publishes the event to connected SSE clients via
+ * {@link PublisherRegistry} and persists the relevant state to the database:
  * <ul>
- *   <li>If accepted ({@code offer()} returns {@code true}), an
- *       {@link EventQueuedForRetryException} is thrown so the webhook dispatcher can
- *       respond with {@code 202 Accepted}.</li>
- *   <li>If the queue is full ({@code offer()} returns {@code false}), a
- *       {@link RetryQueueFullException} is thrown so the dispatcher can respond with
- *       {@code 503 Service Unavailable}.</li>
+ *   <li>{@code BRANCH_UPDATED} — upserts the repository record (with its URL) then the branch row.</li>
+ *   <li>{@code BRANCH_DELETED} — upserts the repository record then deletes the branch row.</li>
+ *   <li>{@code REVIEW_CREATED}, {@code REVIEW_UPDATED}, {@code REVIEW_COMMENT_ADDED} — upserts
+ *       the {@code reviews_index} row with a minimal repositories JSON. The repository URL is
+ *       resolved from the {@code repositories} table if registered; otherwise left null.</li>
  * </ul>
+ *
+ * <p>DB failures are logged as warnings and do not propagate — SSE delivery is never
+ * blocked by a persistence error.
+ *
+ * <p>Note: {@code review_branches} is not populated here because the review-to-branch
+ * association lives in the orphan branch file content, which is not carried in webhook
+ * events. It is populated by the backfill tool after reconciliation.
  */
 public final class EventSinkImpl implements EventSink {
 
     private static final Logger log = LoggerFactory.getLogger(EventSinkImpl.class);
 
-    private final EventRepository repository;
     private final PublisherRegistry publisherRegistry;
-    private final RetryQueue retryQueue;
+    private final BranchRepository branchRepository;
+    private final ReviewsIndexRepository reviewsIndexRepository;
+    private final RepositoriesRepository repositoriesRepository;
+
+    private final Set<String> seenRepositories = ConcurrentHashMap.newKeySet();
+    private volatile Consumer<RepositoryRecord> newRepositoryCallback;
 
     /**
-     * Constructs an {@code EventSinkImpl} without a retry queue.
-     * {@link SQLException} is wrapped in a {@link RuntimeException} and rethrown.
-     *
-     * @param repository        the event repository for persistence
-     * @param publisherRegistry the registry that fans events out to SSE subscribers
+     * Full constructor used in production startup.
      */
-    public EventSinkImpl(EventRepository repository, PublisherRegistry publisherRegistry) {
-        this(repository, publisherRegistry, null);
-    }
-
-    /**
-     * Constructs an {@code EventSinkImpl} with an optional retry queue.
-     *
-     * @param repository        the event repository for persistence
-     * @param publisherRegistry the registry that fans events out to SSE subscribers
-     * @param retryQueue        the retry queue to use on {@link SQLException}, or
-     *                          {@code null} to rethrow immediately
-     */
-    public EventSinkImpl(EventRepository repository, PublisherRegistry publisherRegistry,
-                         RetryQueue retryQueue) {
-        this.repository = repository;
+    public EventSinkImpl(PublisherRegistry publisherRegistry,
+                         BranchRepository branchRepository,
+                         ReviewsIndexRepository reviewsIndexRepository,
+                         RepositoriesRepository repositoriesRepository) {
         this.publisherRegistry = publisherRegistry;
-        this.retryQueue = retryQueue;
+        this.branchRepository = branchRepository;
+        this.reviewsIndexRepository = reviewsIndexRepository;
+        this.repositoriesRepository = repositoriesRepository;
     }
 
     /**
-     * Persists the event and, if not a duplicate, publishes it to all SSE subscribers.
-     *
-     * @param event the event to submit; must not be {@code null}
-     * @throws EventQueuedForRetryException if a {@link SQLException} was caught and the
-     *         event was successfully enqueued for retry
-     * @throws RetryQueueFullException if a {@link SQLException} was caught and the retry
-     *         queue is at capacity
-     * @throws RuntimeException wrapping any {@link SQLException} when no retry queue is
-     *         configured, or wrapping {@link InterruptedException}
+     * SSE-only constructor used in tests and contexts where DB persistence is not required.
      */
+    public EventSinkImpl(PublisherRegistry publisherRegistry) {
+        this(publisherRegistry, null, null, null);
+    }
+
+    /**
+     * Registers a callback invoked the first time a repository is seen via a push webhook.
+     * The callback receives a {@link RepositoryRecord} with a {@code null} cursor so the
+     * reconciler treats it as a first-run and indexes the full review tree.
+     */
+    public void setNewRepositoryCallback(Consumer<RepositoryRecord> callback) {
+        this.newRepositoryCallback = callback;
+    }
+
     @Override
     public void submit(ReviewEvent event) {
+        log.info("Event received: type='{}' repo='{}' reviewId='{}'",
+                event.eventType(), event.repository(), event.reviewId());
+        publisherRegistry.publish(event);
         try {
-            repository.insert(event).ifPresentOrElse(
-                stored -> {
-                    log.info("Event persisted and published: type='{}' repo='{}' reviewId='{}' seq={}",
-                            stored.eventType(), stored.repository(), stored.reviewId(), stored.sequenceNo());
-                    publisherRegistry.publish(stored);
-                },
-                () -> log.info("Duplicate event ignored: deliveryId='{}' repo='{}'",
-                        event.deliveryId(), event.repository())
-            );
-        } catch (SQLException e) {
-            handleSqlException(e, event);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while persisting event", e);
+            persist(event);
+        } catch (Exception e) {
+            log.warn("Failed to persist {} event for '{}' to DB: {}",
+                    event.eventType(), event.repository(), e.getMessage());
         }
     }
 
-    private void handleSqlException(SQLException e, ReviewEvent event) {
-        if (retryQueue == null) {
-            throw new RuntimeException("Failed to persist event for repository: " + event.repository(), e);
+    // -------------------------------------------------------------------------
+
+    private void persist(ReviewEvent event) throws SQLException, InterruptedException {
+        switch (event.eventType()) {
+            case BRANCH_UPDATED        -> persistBranchUpdated(event);
+            case BRANCH_DELETED        -> persistBranchDeleted(event);
+            case REVIEW_CREATED,
+                 REVIEW_UPDATED,
+                 REVIEW_COMMENT_ADDED  -> persistReviewEvent(event);
+            default                    -> {}
         }
-        if (!retryQueue.offer(event)) {
-            throw new RetryQueueFullException(
-                    "Retry queue is full; cannot accept event for repository: " + event.repository());
+    }
+
+    private void persistBranchUpdated(ReviewEvent event) throws SQLException, InterruptedException {
+        if (branchRepository == null) {
+            log.warn("DB persistence skipped for BRANCH_UPDATED '{}': branchRepository not wired",
+                    event.repository());
+            return;
         }
-        throw new EventQueuedForRetryException(
-                "Event queued for retry for repository: " + event.repository());
+        String[] parts = splitRepo(event.repository());
+        String owner = parts[0], repo = parts[1];
+        String branchName  = event.payload().get("branch_name");
+        String headCommit  = event.payload().get("head_commit");
+        String url         = event.payload().get("repository_url");
+
+        if (url == null) {
+            log.warn("BRANCH_UPDATED for '{}' has no repository_url in payload — skipping DB write " +
+                     "(payload keys: {})", event.repository(), event.payload().keySet());
+            return;
+        }
+
+        repositoriesRepository.upsert(owner, repo, url);
+
+        if (seenRepositories.add(owner + "/" + repo)) {
+            Consumer<RepositoryRecord> cb = newRepositoryCallback;
+            if (cb != null) {
+                log.info("First push seen for '{}' — triggering dynamic onboarding", owner + "/" + repo);
+                RepositoryRecord record = new RepositoryRecord(owner, repo, url, null);
+                cb.accept(record);
+            }
+        }
+        log.debug("Repository upserted: {}/{} url='{}'", owner, repo, url);
+
+        if (branchName != null && headCommit != null) {
+            branchRepository.upsert(owner, repo, branchName, headCommit);
+            log.debug("Branch upserted: {}/{} branch='{}' head='{}'",
+                    owner, repo, branchName, headCommit);
+        } else {
+            log.warn("BRANCH_UPDATED for '{}' missing branch_name='{}' or head_commit='{}' — " +
+                     "repository upserted but branch row skipped",
+                    event.repository(), branchName, headCommit);
+        }
+    }
+
+    private void persistBranchDeleted(ReviewEvent event) throws SQLException, InterruptedException {
+        if (branchRepository == null) {
+            log.warn("DB persistence skipped for BRANCH_DELETED '{}': branchRepository not wired",
+                    event.repository());
+            return;
+        }
+        String[] parts = splitRepo(event.repository());
+        String owner = parts[0], repo = parts[1];
+        String branchName = event.payload().get("branch_name");
+        String url        = event.payload().get("repository_url");
+
+        ensureRepository(owner, repo, url);
+
+        if (branchName != null) {
+            branchRepository.delete(owner, repo, branchName);
+            log.debug("Branch deleted: {}/{} branch='{}'", owner, repo, branchName);
+        } else {
+            log.warn("BRANCH_DELETED for '{}' has no branch_name in payload — nothing deleted",
+                    event.repository());
+        }
+    }
+
+    private void persistReviewEvent(ReviewEvent event) throws SQLException, InterruptedException {
+        if (reviewsIndexRepository == null) {
+            log.warn("DB persistence skipped for {} '{}': reviewsIndexRepository not wired",
+                    event.eventType(), event.reviewId());
+            return;
+        }
+        if (event.reviewId() == null) {
+            log.warn("Skipping reviews_index upsert for {} event — reviewId is null",
+                    event.eventType());
+            return;
+        }
+        String[] parts = splitRepo(event.repository());
+        String owner = parts[0], repo = parts[1];
+        String url = resolveRepoUrl(owner, repo);
+        if (url == null) {
+            log.warn("No URL found in repositories table for {}/{} — review '{}' will be stored " +
+                     "without repository_url; register the repo via POST /repositories to fix this",
+                    owner, repo, event.reviewId());
+        }
+
+        String status     = event.payload().get("status");
+        String branchName = event.payload().get("branchName");
+        List<ReviewsIndexMapper.RepoEntry> entries = List.of(
+                new ReviewsIndexMapper.RepoEntry(owner, repo, url, branchName, null));
+        reviewsIndexRepository.upsert(
+                event.reviewId(), status, event.timestamp(),
+                ReviewsIndexMapper.toRepositoriesJson(entries));
+        log.debug("Review upserted in reviews_index: id='{}' repo='{}/{}' url='{}'",
+                event.reviewId(), owner, repo, url);
+    }
+
+    // -------------------------------------------------------------------------
+
+    private void ensureRepository(String owner, String repo, String url)
+            throws SQLException, InterruptedException {
+        if (repositoriesRepository == null || url == null) return;
+        repositoriesRepository.upsert(owner, repo, url);
+        log.debug("Repository upserted: {}/{} url='{}'", owner, repo, url);
+    }
+
+    private String resolveRepoUrl(String owner, String repo) {
+        if (repositoriesRepository == null) return null;
+        try {
+            return repositoriesRepository.findByOwnerAndRepository(owner, repo)
+                    .map(r -> r.url())
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("Could not resolve URL for {}/{}: {}", owner, repo, e.getMessage());
+            return null;
+        }
+    }
+
+    private static String[] splitRepo(String fullName) {
+        int slash = fullName == null ? -1 : fullName.indexOf('/');
+        if (slash < 0) return new String[]{fullName == null ? "" : fullName, ""};
+        return new String[]{fullName.substring(0, slash), fullName.substring(slash + 1)};
     }
 }
-

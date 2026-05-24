@@ -54,8 +54,11 @@ class GitLabWebhookHandlerTest {
         handler.handle(buildHeaders("Push Hook", "uuid-gl-2"), body);
 
         assertEquals(1, submitted.size());
-        assertEquals(EventType.BRANCH_UPDATED, submitted.get(0).eventType());
-        assertEquals("develop", submitted.get(0).payload().get("branch"));
+        ReviewEvent event = submitted.get(0);
+        assertEquals(EventType.BRANCH_UPDATED, event.eventType());
+        assertEquals("develop", event.payload().get("branch_name"));
+        assertEquals("deadbeef", event.payload().get("head_commit"));
+        assertNotNull(event.payload().get("repository_url"));
     }
 
     @Test

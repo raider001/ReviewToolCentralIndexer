@@ -18,6 +18,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
@@ -46,7 +47,10 @@ public final class GitHubReconciler {
      * Creates a reconciler using the JDK default HTTP client.
      */
     public GitHubReconciler() {
-        this.http = HttpClient.newHttpClient();
+        this.http = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
     }
 
     /**
@@ -146,7 +150,8 @@ public final class GitHubReconciler {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.warn("Error fetching GitHub events from {}: {}", url, e.getMessage());
+            log.warn("Error fetching GitHub events from {}: {} — {}", url, e.getClass().getSimpleName(), e.getMessage());
+            log.debug("Full exception for {}", url, e);
             return null;
         }
     }

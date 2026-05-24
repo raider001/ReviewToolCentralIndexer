@@ -1,0 +1,11 @@
+[
+  { "url": "https://github.com/raider001/serverless-code-review-tool" },
+  { "url": "https://github.com/raider001/ReviewToolApplication" },
+  { "url": "https://github.com/raider001/ReviewToolCentralIndexer" },
+  { "url": "https://github.com/raider001/ReviewToolCentralIndexerPluginApi" },
+  { "url": "https://github.com/raider001/ReviewToolDefaultNotificationPlugin" },
+  { "url": "https://github.com/raider001/ReviewToolPluginInterface" },
+  { "url": "https://github.com/raider001/ReviewToolDefaultUserPlugin" },
+  { "url": "https://github.com/raider001/ReviewToolDefaultSyntaxHighlighterPlugin" },
+  { "url": "https://github.com/raider001/KalynxSwingCustomTheme" }
+]

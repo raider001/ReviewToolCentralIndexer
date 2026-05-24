@@ -54,7 +54,7 @@ public final class GitLabWebhookHandler implements WebhookHandler {
 
     @Override
     public void handle(Map<String, String> headers, byte[] rawBody) {
-        String event = headers.getOrDefault("x-gitlab-event", headers.get("X-Gitlab-Event"));
+        String event = headers.get("x-gitlab-event");
         if (!"Push Hook".equals(event)) {
             return;
         }
@@ -62,17 +62,18 @@ public final class GitLabWebhookHandler implements WebhookHandler {
         String body = new String(rawBody, StandardCharsets.UTF_8);
         JsonObject json = JsonParser.parseString(body).getAsJsonObject();
 
-        String repoFullName = json.getAsJsonObject("repository").get("name").getAsString();
+        JsonObject repository = json.getAsJsonObject("repository");
+        String repoFullName = repository.get("name").getAsString();
+        String repoUrl = extractRepoUrl(repository);
         String secret = resolveSecret(repoFullName);
-        String tokenHeader = headers.getOrDefault("x-gitlab-token", headers.get("X-Gitlab-Token"));
+        String tokenHeader = headers.get("x-gitlab-token");
 
         if (!verifyToken(secret, tokenHeader)) {
             log.warn("Invalid token for GitLab push on repository {}", repoFullName);
             return;
         }
 
-        String deliveryId = headers.getOrDefault(
-                "x-gitlab-event-uuid", headers.get("X-Gitlab-Event-UUID"));
+        String deliveryId = headers.get("x-gitlab-event-uuid");
         String ref = json.get("ref").getAsString();
         String afterHash = json.has("after") ? json.get("after").getAsString() : null;
         String actorUser = json.has("user_username")
@@ -84,14 +85,14 @@ public final class GitLabWebhookHandler implements WebhookHandler {
             return;
         }
 
-        ReviewEvent reviewEvent = buildEvent(parsed, repoFullName, actorUser,
+        ReviewEvent reviewEvent = buildEvent(parsed, repoFullName, repoUrl, actorUser,
                 timestamp, afterHash, deliveryId);
         if (reviewEvent != null) {
             submit(reviewEvent);
         }
     }
 
-    private ReviewEvent buildEvent(ParsedRef parsed, String repo, String actor,
+    private ReviewEvent buildEvent(ParsedRef parsed, String repo, String repoUrl, String actor,
                                    Instant timestamp, String afterHash, String deliveryId) {
         switch (parsed.type()) {
             case NOTES -> {
@@ -105,8 +106,8 @@ public final class GitLabWebhookHandler implements WebhookHandler {
                 boolean deleted = ReviewRefParser.isBranchDeletion(afterHash);
                 EventType type = deleted ? EventType.BRANCH_DELETED : EventType.BRANCH_UPDATED;
                 Map<String, String> payload = (!deleted && afterHash != null)
-                        ? Map.of("branch", parsed.branch(), "headSha", afterHash)
-                        : Map.of("branch", parsed.branch());
+                        ? Map.of("repository_url", repoUrl, "branch_name", parsed.branch(), "head_commit", afterHash)
+                        : Map.of("repository_url", repoUrl, "branch_name", parsed.branch());
                 return new ReviewEvent(0L, timestamp, repo, type,
                         null, actor, deliveryId, payload);
             }
@@ -150,6 +151,21 @@ public final class GitLabWebhookHandler implements WebhookHandler {
             return perRepo;
         }
         return config.properties().getOrDefault("webhookSecret", "");
+    }
+
+    private String extractRepoUrl(JsonObject repository) {
+        // Prefer git_http_url (HTTPS) over ssh_url
+        if (repository.has("git_http_url") && !repository.get("git_http_url").isJsonNull()) {
+            return repository.get("git_http_url").getAsString();
+        }
+        if (repository.has("url") && !repository.get("url").isJsonNull()) {
+            return repository.get("url").getAsString();
+        }
+        // Fallback: construct from homepage or name
+        if (repository.has("homepage") && !repository.get("homepage").isJsonNull()) {
+            return repository.get("homepage").getAsString();
+        }
+        return "https://gitlab.com/unknown";
     }
 }
 

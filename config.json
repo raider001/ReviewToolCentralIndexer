@@ -29,7 +29,6 @@
       "webhookSecret": "banana",
       "apiToken": "${GITHUB_API_TOKEN}"
     }
-  },
-  "repositories": []
+  }
 }
 

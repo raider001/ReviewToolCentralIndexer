@@ -4,7 +4,6 @@ import com.kalynx.centralindexer.config.AppConfig;
 import com.kalynx.centralindexer.config.DatabaseConfig;
 import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.DatabaseInitializer;
-import com.kalynx.centralindexer.db.EventRepository;
 import com.kalynx.centralindexer.http.IndexerHttpServer;
 import com.kalynx.centralindexer.it.support.PostgresTestContainer;
 import com.kalynx.centralindexer.it.support.RequiresDocker;
@@ -12,6 +11,7 @@ import com.kalynx.centralindexer.it.support.TestKeystore;
 import com.kalynx.centralindexer.json.GsonFactory;
 import com.kalynx.centralindexer.model.EventType;
 import com.kalynx.centralindexer.model.ReviewEvent;
+import com.kalynx.centralindexer.plugin.EventSinkImpl;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
 import org.junit.jupiter.api.AfterEach;
@@ -45,7 +45,8 @@ class TlsIT {
 
     private PostgresTestContainer container;
     private ConnectionPool pool;
-    private EventRepository eventRepo;
+    private PublisherRegistry registry;
+    private EventSinkImpl sink;
     private IndexerHttpServer server;
     private TestKeystore keystore;
 
@@ -55,7 +56,8 @@ class TlsIT {
         DatabaseConfig dbConfig = buildDbConfig(container);
         pool = new ConnectionPool(dbConfig);
         new DatabaseInitializer(pool).init();
-        eventRepo = new EventRepository(pool);
+        registry = new PublisherRegistry();
+        sink = new EventSinkImpl(registry);
         keystore = new TestKeystore();
         server = buildTlsServer(dbConfig);
         server.start();
@@ -86,13 +88,8 @@ class TlsIT {
     @Test
     void sseStreamReachableOverHttps() throws Exception {
         String repo = "owner/tls-sse-test";
-        eventRepo.insert(new ReviewEvent(
-                0L, Instant.now(), repo,
-                EventType.REVIEW_CREATED, null, null,
-                "delivery-tls-sse-1", Map.of()));
 
-        HttpsURLConnection conn = openHttps(
-                "/events/stream?repository=" + repo + "&since=0");
+        HttpsURLConnection conn = openHttps("/events/stream?repository=" + repo);
         conn.setReadTimeout(10_000);
         conn.connect();
         assertEquals(200, conn.getResponseCode(),
@@ -112,9 +109,13 @@ class TlsIT {
             }
         });
 
+        Thread.sleep(300);
+        sink.submit(new ReviewEvent(0L, Instant.now(), repo,
+                EventType.REVIEW_CREATED, null, null, "delivery-tls-sse-1", Map.of()));
+
         String dataLine = pollDataLine(lines, 8);
         assertTrue(dataLine != null && dataLine.startsWith("data: "),
-                "SSE client must receive a replayed data frame over HTTPS");
+                "SSE client must receive a data frame over HTTPS");
     }
 
     private HttpsURLConnection openHttps(String path) throws Exception {
@@ -152,8 +153,7 @@ class TlsIT {
                 dbConfig.getUser(),
                 dbConfig.getPassword());
         AppConfig config = GsonFactory.getInstance().fromJson(json, AppConfig.class);
-        return new IndexerHttpServer(config, pool, new WebhookRouterImpl(),
-                eventRepo, new PublisherRegistry());
+        return new IndexerHttpServer(config, pool, new WebhookRouterImpl(), registry);
     }
 
     private DatabaseConfig buildDbConfig(PostgresTestContainer container) {
@@ -163,6 +163,3 @@ class TlsIT {
         return GsonFactory.getInstance().fromJson(json, DatabaseConfig.class);
     }
 }
-
-
-

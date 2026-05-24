@@ -1,0 +1,13 @@
+{
+  "sequenceNo": 3,
+  "timestamp": "2026-05-22T00:00:00Z",
+  "repository": "sys-org/backend",
+  "eventType": "BRANCH_DELETED",
+  "reviewId": null,
+  "actorUser": "actor",
+  "deliveryId": "delivery-bd-1",
+  "payload": {
+    "repository_url": "https://github.com/sys-org/backend.git",
+    "branch_name": "feature/sys-test"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "review_id": "sys-rev-001",
+      "status": "open",
+      "last_updated": "2026-05-22T00:00:00Z",
+      "review_branch": "feature/sys-test",
+      "base_branch": null,
+      "repositories": [
+        {
+          "repository": "sys-org/backend",
+          "repository_url": "https://github.com/sys-org/backend.git"
+        }
+      ]
+    }
+  ]
+}

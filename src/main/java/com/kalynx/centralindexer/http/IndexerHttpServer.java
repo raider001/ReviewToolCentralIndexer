@@ -1,9 +1,12 @@
 package com.kalynx.centralindexer.http;
 
 import com.kalynx.centralindexer.config.AppConfig;
+import com.kalynx.centralindexer.db.BranchRepository;
 import com.kalynx.centralindexer.db.ConnectionPool;
-import com.kalynx.centralindexer.db.EventRepository;
+import com.kalynx.centralindexer.db.RepositoriesRepository;
+import com.kalynx.centralindexer.db.ReviewsIndexRepository;
 import com.kalynx.centralindexer.exception.TlsConfigurationException;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
 import com.sun.net.httpserver.HttpServer;
@@ -15,11 +18,15 @@ import java.util.concurrent.Executors;
  * Embedded HTTP(S) server for the Central Indexer.
  *
  * <p>Binds on {@code server.port} (default 8765) using a virtual-thread-per-task executor.
- * Three contexts are registered:
+ * Six contexts are registered (three optional, conditional on their dependency being non-null):
  * <ul>
- *   <li>{@code /health} - database health check, auth bypassed always</li>
- *   <li>{@code /webhooks/} - plugin webhook dispatch, auth bypassed always</li>
- *   <li>{@code /events} - guarded by {@link AuthFilter}</li>
+ *   <li>{@code /health} — database health check, auth bypassed always</li>
+ *   <li>{@code /webhooks/} — plugin webhook dispatch, auth bypassed always</li>
+ *   <li>{@code /metrics} — operational metrics snapshot, auth bypassed always</li>
+ *   <li>{@code /events/stream} — live SSE stream, guarded by {@link AuthFilter}</li>
+ *   <li>{@code /branches} — branch typeahead, guarded by {@link AuthFilter}</li>
+ *   <li>{@code /reviews} — review index query, guarded by {@link AuthFilter}</li>
+ *   <li>{@code /repositories} — repository registration, guarded by {@link AuthFilter}</li>
  * </ul>
  *
  * <p>When {@code server.tls.enabled} is {@code false} or the {@code tls} block is absent,
@@ -31,23 +38,62 @@ public final class IndexerHttpServer {
     private final HttpServer server;
 
     /**
+     * Convenience overload that skips the {@code /branches} and {@code /reviews} contexts.
+     * Equivalent to {@code IndexerHttpServer(config, pool, router, registry, null, null)}.
+     */
+    public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
+                             PublisherRegistry registry) throws IOException {
+        this(config, pool, router, registry, null, null);
+    }
+
+    /**
+     * Convenience overload that skips the {@code /reviews} context.
+     * Equivalent to {@code IndexerHttpServer(config, pool, router, registry, branchRepository, null)}.
+     */
+    public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
+                             PublisherRegistry registry, BranchRepository branchRepository)
+            throws IOException {
+        this(config, pool, router, registry, branchRepository, null);
+    }
+
+    /**
+     * Convenience overload that skips the {@code /repositories} context.
+     * Equivalent to {@code IndexerHttpServer(config, pool, router, registry, branchRepository, reviewsRepository, null)}.
+     */
+    public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
+                             PublisherRegistry registry, BranchRepository branchRepository,
+                             ReviewsIndexRepository reviewsRepository)
+            throws IOException {
+        this(config, pool, router, registry, branchRepository, reviewsRepository, null);
+    }
+
+    /**
      * Creates and configures the HTTP(S) server. Does not start accepting connections until
      * {@link #start()} is called.
      *
-     * @param config     the application configuration
-     * @param pool       the connection pool for health checks
-     * @param router     the webhook router populated by the provider plugin
-     * @param repository the event repository for SSE replay and cursor validation
-     * @param registry   the publisher registry for live SSE fan-out
-     * @throws IOException                if the server socket cannot be bound
-     * @throws TlsConfigurationException  if TLS is enabled and the keystore cannot be loaded
+     * @param config                   the application configuration
+     * @param pool                     the connection pool for health checks
+     * @param router                   the webhook router populated by the provider plugin
+     * @param registry                 the publisher registry for live SSE fan-out; may be {@code null}
+     *                                 to skip registering the SSE endpoint
+     * @param branchRepository         the branch query repository; may be {@code null} to skip
+     *                                 registering the {@code /branches} endpoint
+     * @param reviewsRepository        the reviews index repository; may be {@code null} to skip
+     *                                 registering the {@code /reviews} endpoint
+     * @param repositoriesRepository   the repositories repository; may be {@code null} to skip
+     *                                 registering the {@code /repositories} endpoint
+     * @throws IOException               if the server socket cannot be bound
+     * @throws TlsConfigurationException if TLS is enabled and the keystore cannot be loaded
      */
     public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
-                             EventRepository repository, PublisherRegistry registry)
+                             PublisherRegistry registry, BranchRepository branchRepository,
+                             ReviewsIndexRepository reviewsRepository,
+                             RepositoriesRepository repositoriesRepository)
             throws IOException {
         server = createServer(config);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-        registerHandlers(config, pool, router, repository, registry);
+        registerHandlers(config, pool, router, registry, branchRepository, reviewsRepository,
+                repositoriesRepository);
     }
 
     /**
@@ -82,14 +128,28 @@ public final class IndexerHttpServer {
     }
 
     private void registerHandlers(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
-                                  EventRepository repository, PublisherRegistry registry) {
-        server.createContext("/health", new HealthHandler(pool));
+                                  PublisherRegistry registry, BranchRepository branchRepository,
+                                  ReviewsIndexRepository reviewsRepository,
+                                  RepositoriesRepository repositoriesRepository) {
+        MetricsCollector metrics = new MetricsCollector(pool);
+        server.createContext("/health",   new HealthHandler(pool));
         server.createContext("/webhooks/", new WebhookDispatcher(router));
-        if (repository != null && registry != null) {
+        server.createContext("/metrics",   new MetricsHandler(metrics));
+        if (registry != null) {
             server.createContext("/events/stream",
-                    new AuthFilter(config.getAuth(), new SseHandler(repository, registry)));
+                    new AuthFilter(config.getAuth(), new SseHandler(registry, metrics)));
         }
-        server.createContext("/events", new AuthFilter(config.getAuth(), new EventsHandler(repository)));
+        if (branchRepository != null) {
+            server.createContext("/branches",
+                    new AuthFilter(config.getAuth(), new BranchesHandler(branchRepository, metrics)));
+        }
+        if (reviewsRepository != null) {
+            server.createContext("/reviews",
+                    new AuthFilter(config.getAuth(), new ReviewsHandler(reviewsRepository, metrics)));
+        }
+        if (repositoriesRepository != null) {
+            server.createContext("/repositories",
+                    new AuthFilter(config.getAuth(), new RepositoriesHandler(repositoriesRepository)));
+        }
     }
 }
-

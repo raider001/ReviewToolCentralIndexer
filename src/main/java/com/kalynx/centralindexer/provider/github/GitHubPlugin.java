@@ -24,14 +24,16 @@ import java.time.Instant;
 public final class GitHubPlugin implements ProviderPlugin {
 
     private final GitHubReconciler reconciler;
+    private final GitHubBranchReconciler branchReconciler;
     private ProviderConfig config;
     private EventSink sink;
 
     /**
-     * Creates a {@code GitHubPlugin} with the default HTTP-based reconciler.
+     * Creates a {@code GitHubPlugin} with the default HTTP-based reconcilers.
      */
     public GitHubPlugin() {
         this.reconciler = new GitHubReconciler();
+        this.branchReconciler = new GitHubBranchReconciler();
     }
 
     @Override
@@ -51,6 +53,37 @@ public final class GitHubPlugin implements ProviderPlugin {
         if (config != null && sink != null) {
             reconciler.reconcile(repository, since, config, sink);
         }
+    }
+
+    @Override
+    public void reconcileAllBranches(String repository) {
+        if (config != null && sink != null) {
+            branchReconciler.reconcileAllBranches(repository, config, sink);
+        }
+    }
+
+    @Override
+    public boolean reconcileFullReviewTree(String repository, String headCommit) {
+        if (config != null && sink != null) {
+            return branchReconciler.reconcileFullReviewTree(repository, headCommit, config, sink);
+        }
+        return false;
+    }
+
+    @Override
+    public String fetchKalynxReviewHead(String repository) {
+        if (config == null) {
+            return null;
+        }
+        return branchReconciler.fetchKalynxReviewHead(repository, config);
+    }
+
+    @Override
+    public boolean reconcileFromCommit(String repository, String fromCommit, String toCommit) {
+        if (config != null && sink != null) {
+            return branchReconciler.reconcileFromCommit(repository, fromCommit, toCommit, config, sink);
+        }
+        return false;
     }
 
     @Override

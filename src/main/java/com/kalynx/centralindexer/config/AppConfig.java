@@ -1,7 +1,5 @@
 package com.kalynx.centralindexer.config;
 
-import java.util.Collections;
-import java.util.List;
 
 /**
  * Top-level application configuration deserialised from {@code config.json}.
@@ -17,7 +15,6 @@ public final class AppConfig {
     private DatabaseConfig database;
     private IndexerConfig indexer = new IndexerConfig();
     private PluginSettings plugin;
-    private List<String> repositories = Collections.emptyList();
 
     /**
      * Returns the HTTP server configuration.
@@ -65,14 +62,5 @@ public final class AppConfig {
         return plugin;
     }
 
-    /**
-     * Returns the list of canonical repository identifiers ({@code owner/repo}) that
-     * the plugin is responsible for reconciling at startup.
-     *
-     * @return an immutable list of repository names
-     */
-    public List<String> getRepositories() {
-        return repositories == null ? Collections.emptyList() : Collections.unmodifiableList(repositories);
-    }
 }
 

@@ -1,0 +1,16 @@
+{
+  "event": "BRANCH_DELETED",
+  "data": {
+    "sequenceNo": 3,
+    "timestamp": "2026-01-15T10:33:00Z",
+    "repository": "acme-org/backend",
+    "eventType": "BRANCH_DELETED",
+    "reviewId": null,
+    "actorUser": "jane.doe",
+    "deliveryId": "delivery-003",
+    "payload": {
+      "repository_url": "https://github.com/acme-org/backend.git",
+      "branch_name": "feature/my-feature"
+    }
+  }
+}

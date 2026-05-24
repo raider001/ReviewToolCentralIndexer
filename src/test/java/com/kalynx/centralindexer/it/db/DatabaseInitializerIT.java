@@ -27,11 +27,13 @@ class DatabaseInitializerIT {
             new DatabaseInitializer(pool).init();
 
             Connection conn = pool.acquire();
-            assertTableExists(conn, "events");
-            assertTableExists(conn, "repository_state");
-            assertIndexExists(conn, "idx_events_repo_seq");
-            assertIndexExists(conn, "idx_events_delivery_id");
-            assertIndexExists(conn, "idx_events_timestamp");
+            assertTableExists(conn, "reviews_index");
+            assertTableExists(conn, "repositories");
+            assertTableExists(conn, "branches");
+            assertTableExists(conn, "review_branches");
+            assertIndexExists(conn, "idx_reviews_index_last_updated");
+            assertIndexExists(conn, "idx_reviews_index_repositories_gin");
+            assertIndexExists(conn, "idx_branches_name_prefix");
             pool.release(conn);
             pool.close();
         }
@@ -44,6 +46,19 @@ class DatabaseInitializerIT {
             DatabaseInitializer initializer = new DatabaseInitializer(pool);
             initializer.init();
             assertDoesNotThrow(initializer::init);
+            pool.close();
+        }
+    }
+
+    @Test
+    void repositoriesTableHasKalynxReviewHeadColumn() throws Exception {
+        try (PostgresTestContainer container = new PostgresTestContainer()) {
+            ConnectionPool pool = buildPool(container);
+            new DatabaseInitializer(pool).init();
+
+            Connection conn = pool.acquire();
+            assertColumnExists(conn, "repositories", "kalynx_review_head");
+            pool.release(conn);
             pool.close();
         }
     }
@@ -64,6 +79,15 @@ class DatabaseInitializerIT {
         assertEquals(1, rs.getInt(1), "Index '" + indexName + "' should exist");
     }
 
+    private void assertColumnExists(Connection conn, String tableName, String columnName) throws Exception {
+        ResultSet rs = conn.createStatement().executeQuery(
+                "SELECT COUNT(*) FROM information_schema.columns " +
+                "WHERE table_schema = 'public' AND table_name = '" + tableName +
+                "' AND column_name = '" + columnName + "'");
+        rs.next();
+        assertEquals(1, rs.getInt(1), "Column '" + tableName + "." + columnName + "' should exist");
+    }
+
     private ConnectionPool buildPool(PostgresTestContainer container) {
         DatabaseConfig config = GsonFactory.getInstance().fromJson("""
                 {
@@ -77,4 +101,3 @@ class DatabaseInitializerIT {
         return new ConnectionPool(config);
     }
 }
-

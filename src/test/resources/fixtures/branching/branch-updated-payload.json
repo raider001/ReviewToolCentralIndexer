@@ -1,0 +1,17 @@
+{
+  "event": "BRANCH_UPDATED",
+  "data": {
+    "sequenceNo": 1,
+    "timestamp": "2026-01-15T10:31:00Z",
+    "repository": "acme-org/backend",
+    "eventType": "BRANCH_UPDATED",
+    "reviewId": null,
+    "actorUser": "jane.doe",
+    "deliveryId": "delivery-001",
+    "payload": {
+      "repository_url": "https://github.com/acme-org/backend.git",
+      "branch_name": "feature/my-feature",
+      "head_commit": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3"
+    }
+  }
+}

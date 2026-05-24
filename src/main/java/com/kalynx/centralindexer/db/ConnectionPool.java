@@ -30,6 +30,9 @@ public final class ConnectionPool implements AutoCloseable {
     }
 
     private final LinkedBlockingQueue<Connection> pool;
+    private final int capacity;
+    private final java.util.concurrent.atomic.AtomicInteger waitingCount =
+            new java.util.concurrent.atomic.AtomicInteger(0);
 
     /**
      * Creates a {@code ConnectionPool} by opening {@code config.poolSize} JDBC connections.
@@ -43,8 +46,9 @@ public final class ConnectionPool implements AutoCloseable {
     }
 
     ConnectionPool(DatabaseConfig config, ConnectionSupplier supplier) {
-        pool = new LinkedBlockingQueue<>(config.getPoolSize());
-        for (int i = 0; i < config.getPoolSize(); i++) {
+        capacity = config.getPoolSize();
+        pool = new LinkedBlockingQueue<>(capacity);
+        for (int i = 0; i < capacity; i++) {
             pool.offer(openConnection(supplier, config.getUrl()));
         }
     }
@@ -56,7 +60,30 @@ public final class ConnectionPool implements AutoCloseable {
      * @throws InterruptedException if the waiting thread is interrupted
      */
     public Connection acquire() throws InterruptedException {
-        return pool.take();
+        waitingCount.incrementAndGet();
+        try {
+            return pool.take();
+        } finally {
+            waitingCount.decrementAndGet();
+        }
+    }
+
+    /**
+     * Returns the number of connections currently checked out (not in the pool).
+     *
+     * @return active connection count
+     */
+    public int getActiveConnections() {
+        return capacity - pool.size();
+    }
+
+    /**
+     * Returns the number of threads currently blocked waiting in {@link #acquire()}.
+     *
+     * @return waiting thread count
+     */
+    public int getWaitingThreads() {
+        return waitingCount.get();
     }
 
     /**

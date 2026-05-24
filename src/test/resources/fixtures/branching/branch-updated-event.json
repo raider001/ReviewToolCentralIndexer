@@ -1,0 +1,14 @@
+{
+  "sequenceNo": 1,
+  "timestamp": "2026-05-22T00:00:00Z",
+  "repository": "sys-org/backend",
+  "eventType": "BRANCH_UPDATED",
+  "reviewId": null,
+  "actorUser": "actor",
+  "deliveryId": "delivery-bu-1",
+  "payload": {
+    "repository_url": "https://github.com/sys-org/backend.git",
+    "branch_name": "feature/sys-test",
+    "head_commit": "deadbeef01234567"
+  }
+}

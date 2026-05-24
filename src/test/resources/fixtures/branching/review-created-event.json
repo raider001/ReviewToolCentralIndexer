@@ -1,0 +1,10 @@
+{
+  "sequenceNo": 2,
+  "timestamp": "2026-05-22T00:00:00Z",
+  "repository": "sys-org/backend",
+  "eventType": "REVIEW_CREATED",
+  "reviewId": "sys-rev-001",
+  "actorUser": "actor",
+  "deliveryId": "delivery-rc-1",
+  "payload": {}
+}

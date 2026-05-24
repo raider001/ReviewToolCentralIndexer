@@ -13,6 +13,7 @@ import com.kalynx.centralindexer.spi.WebhookHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Collections;
@@ -56,22 +57,31 @@ public final class GitHubWebhookHandler implements WebhookHandler {
 
     @Override
     public void handle(Map<String, String> headers, byte[] rawBody) {
-        String event = headers.getOrDefault("x-github-event", headers.get("X-GitHub-Event"));
-        String deliveryId = headers.getOrDefault("x-github-delivery", headers.get("X-GitHub-Delivery"));
+        String event = headers.get("x-github-event");
+        String deliveryId = headers.getOrDefault("x-github-delivery", "-");
 
         if (!"push".equals(event)) {
             log.debug("Ignoring GitHub event type '{}' (delivery='{}')", event, deliveryId);
             return;
         }
 
-        String body = new String(rawBody, StandardCharsets.UTF_8);
+        try {
+            handlePush(rawBody, headers, deliveryId);
+        } catch (Exception e) {
+            log.error("Failed to handle GitHub push delivery='{}': {}", deliveryId, e.getMessage(), e);
+        }
+    }
+
+    private void handlePush(byte[] rawBody, Map<String, String> headers, String deliveryId) {
+        String body = extractJsonBody(rawBody, headers);
         JsonObject json = JsonParser.parseString(body).getAsJsonObject();
 
-        String repoFullName = json.getAsJsonObject("repository").get("full_name").getAsString();
+        JsonObject repository = json.getAsJsonObject("repository");
+        String repoFullName = repository.get("full_name").getAsString();
+        String repoUrl = extractRepoUrl(repository);
         String secret = resolveSecret(repoFullName);
 
-        String sigHeader = headers.getOrDefault(
-                "x-hub-signature-256", headers.get("X-Hub-Signature-256"));
+        String sigHeader = headers.get("x-hub-signature-256");
         if (!HmacSignatureVerifier.verify(secret, rawBody, sigHeader)) {
             log.warn("Invalid signature for GitHub push on repository {}", repoFullName);
             return;
@@ -92,7 +102,7 @@ public final class GitHubWebhookHandler implements WebhookHandler {
             return;
         }
 
-        ReviewEvent reviewEvent = buildEvent(parsed, repoFullName, actorUser,
+        ReviewEvent reviewEvent = buildEvent(parsed, repoFullName, repoUrl, actorUser,
                 timestamp, afterHash, deliveryId);
         if (reviewEvent != null) {
             log.info("Submitting event: type='{}' repo='{}' reviewId='{}' delivery='{}'",
@@ -102,7 +112,7 @@ public final class GitHubWebhookHandler implements WebhookHandler {
         }
     }
 
-    private ReviewEvent buildEvent(ParsedRef parsed, String repo, String actor,
+    private ReviewEvent buildEvent(ParsedRef parsed, String repo, String repoUrl, String actor,
                                    Instant timestamp, String afterHash, String deliveryId) {
         switch (parsed.type()) {
             case NOTES -> {
@@ -116,8 +126,8 @@ public final class GitHubWebhookHandler implements WebhookHandler {
                 boolean deleted = ReviewRefParser.isBranchDeletion(afterHash);
                 EventType type = deleted ? EventType.BRANCH_DELETED : EventType.BRANCH_UPDATED;
                 Map<String, String> payload = (afterHash != null && !deleted)
-                        ? Map.of("branch", parsed.branch(), "headSha", afterHash)
-                        : Map.of("branch", parsed.branch());
+                        ? Map.of("repository_url", repoUrl, "branch_name", parsed.branch(), "head_commit", afterHash)
+                        : Map.of("repository_url", repoUrl, "branch_name", parsed.branch());
                 return new ReviewEvent(0L, timestamp, repo, type,
                         null, actor, deliveryId, payload);
             }
@@ -132,6 +142,21 @@ public final class GitHubWebhookHandler implements WebhookHandler {
             log.warn("Failed to submit GitHub event for repository {}: {}",
                     event.repository(), e.getMessage());
         }
+    }
+
+    // GitHub sends application/x-www-form-urlencoded for some webhook configurations,
+    // wrapping the JSON as payload=<url-encoded-json>.
+    private String extractJsonBody(byte[] rawBody, Map<String, String> headers) {
+        String contentType = headers.getOrDefault("content-type", "");
+        String body = new String(rawBody, StandardCharsets.UTF_8);
+        if (contentType.startsWith("application/x-www-form-urlencoded")) {
+            for (String param : body.split("&")) {
+                if (param.startsWith("payload=")) {
+                    return URLDecoder.decode(param.substring("payload=".length()), StandardCharsets.UTF_8);
+                }
+            }
+        }
+        return body;
     }
 
     private Instant extractTimestamp(JsonObject json) {
@@ -151,5 +176,17 @@ public final class GitHubWebhookHandler implements WebhookHandler {
             return perRepo;
         }
         return config.properties().getOrDefault("webhookSecret", "");
+    }
+
+    private String extractRepoUrl(JsonObject repository) {
+        // Prefer clone_url (HTTPS) over html_url
+        if (repository.has("clone_url") && !repository.get("clone_url").isJsonNull()) {
+            return repository.get("clone_url").getAsString();
+        }
+        if (repository.has("html_url") && !repository.get("html_url").isJsonNull()) {
+            return repository.get("html_url").getAsString();
+        }
+        // Fallback: construct from full_name
+        return "https://github.com/" + repository.get("full_name").getAsString();
     }
 }

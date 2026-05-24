@@ -1,8 +1,8 @@
 package com.kalynx.centralindexer.http;
 
 import com.google.gson.Gson;
-import com.kalynx.centralindexer.db.EventRepository;
 import com.kalynx.centralindexer.json.GsonFactory;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.model.ReviewEvent;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
 import com.sun.net.httpserver.HttpExchange;
@@ -14,40 +14,29 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.concurrent.Flow;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Handles {@code GET /events/stream?repository=<repo>&since=<n>}.
+ * Handles {@code GET /events/stream?repository=<repo>}.
  *
- * <p>Passing {@code repository=*} subscribes to all repositories at once. In that mode
- * cursor validation and per-repository replay are skipped; the server replays all stored
- * events within the retention window and then streams live events for every repository.
- * This allows a single persistent connection regardless of how many repositories the
- * client monitors.
+ * <p>Passing {@code repository=*} subscribes to all repositories at once.
  *
  * <p>On a valid request the handler:
  * <ol>
- *   <li>Optionally validates the cursor via {@link EventRepository#hasEventAt} when
- *       {@code since > 0}, returning {@code 410 Gone} if the event no longer exists.</li>
  *   <li>Sets SSE response headers ({@code Content-Type: text/event-stream},
  *       {@code Cache-Control: no-cache}, {@code X-Accel-Buffering: no}) and sends
  *       {@code 200 OK} with a streaming (chunked) body.</li>
- *   <li>Replays stored events with {@code sequence_no > since} via
- *       {@link EventRepository#queryEvents}.</li>
  *   <li>Subscribes to {@link PublisherRegistry} and streams live events until the client
  *       disconnects or the thread is interrupted.</li>
  * </ol>
  *
- * <p>If {@code ?since=} is absent but the request carries a {@code Last-Event-ID} header,
- * that header value is used as the cursor (behavior 5.12). An explicit {@code ?since=}
- * always takes precedence.
+ * <p>Clients that reconnect should re-call {@code GET /reviews} to catch any missed
+ * updates before reopening this stream.
  *
  * <p>Each SSE frame is written as:
  * <pre>
- * id: &lt;sequenceNo&gt;
  * event: &lt;eventType&gt;
  * data: &lt;fullEventJson&gt;
  *
@@ -57,23 +46,19 @@ public final class SseHandler implements HttpHandler {
 
     private static final Logger log = LoggerFactory.getLogger(SseHandler.class);
     private static final String PARAM_REPOSITORY = "repository";
-    private static final String PARAM_SINCE = "since";
-    private static final String HEADER_LAST_EVENT_ID = "Last-Event-ID";
     private static final String WILDCARD_REPO = "*";
 
-    private final EventRepository eventRepository;
     private final PublisherRegistry registry;
+    private final MetricsCollector metrics;
     private final Gson gson;
 
-    /**
-     * Constructs an {@code SseHandler} backed by the given repository and registry.
-     *
-     * @param eventRepository source for event replay and cursor validation
-     * @param registry        live event fan-out registry
-     */
-    public SseHandler(EventRepository eventRepository, PublisherRegistry registry) {
-        this.eventRepository = eventRepository;
+    public SseHandler(PublisherRegistry registry) {
+        this(registry, null);
+    }
+
+    public SseHandler(PublisherRegistry registry, MetricsCollector metrics) {
         this.registry = registry;
+        this.metrics = metrics;
         this.gson = GsonFactory.getInstance();
     }
 
@@ -85,81 +70,25 @@ public final class SseHandler implements HttpHandler {
             return;
         }
 
-        if (WILDCARD_REPO.equals(repo)) {
-            handleWildcard(exchange);
-            return;
-        }
-
-        long since = parseSince(exchange);
-        String clientAddress = exchange.getRemoteAddress().toString();
-
-        if (since > 0) {
-            try {
-                if (!eventRepository.hasEventAt(repo, since)) {
-                    log.warn("SSE client {} requested cursor {} for '{}' which is outside the retention window",
-                            clientAddress, since, repo);
-                    sendError(exchange, 410, "{\"error\":\"Cursor is outside the retention window\"}");
-                    return;
-                }
-            } catch (Exception e) {
-                sendError(exchange, 500, "{\"error\":\"Internal server error\"}");
-                return;
-            }
-        }
+        String clientAddress = exchange.getRemoteAddress() != null
+                ? exchange.getRemoteAddress().toString()
+                : "unknown";
 
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
         exchange.getResponseHeaders().set("Cache-Control", "no-cache");
         exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
         exchange.sendResponseHeaders(200, 0);
 
-        log.info("SSE client connected: address='{}' repo='{}' since={}", clientAddress, repo, since);
+        log.info("SSE client connected: address='{}' repo='{}'", clientAddress, repo);
+        if (metrics != null) metrics.incrementConnectedClients();
         try (OutputStream out = exchange.getResponseBody()) {
-            replayStoredEvents(out, repo, since);
             streamLiveEvents(out, repo);
         } catch (Exception e) {
             log.debug("SSE stream closed for client '{}' repo='{}': {}", clientAddress, repo, e.getMessage());
         } finally {
+            if (metrics != null) metrics.decrementConnectedClients();
             log.info("SSE client disconnected: address='{}' repo='{}'", clientAddress, repo);
         }
-    }
-
-    private void handleWildcard(HttpExchange exchange) throws IOException {
-        String clientAddress = exchange.getRemoteAddress().toString();
-        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
-        exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
-        exchange.sendResponseHeaders(200, 0);
-        log.info("SSE wildcard client connected: address='{}'", clientAddress);
-        try (OutputStream out = exchange.getResponseBody()) {
-            replayAllStoredEvents(out);
-            streamLiveEvents(out, WILDCARD_REPO);
-        } catch (Exception e) {
-            log.debug("SSE wildcard stream closed for client '{}': {}", clientAddress, e.getMessage());
-        } finally {
-            log.info("SSE wildcard client disconnected: address='{}'", clientAddress);
-        }
-    }
-
-    private void replayAllStoredEvents(OutputStream out) throws Exception {
-        List<ReviewEvent> stored = eventRepository.queryAllEvents(Integer.MAX_VALUE);
-        if (!stored.isEmpty()) {
-            log.info("Replaying {} stored event(s) for wildcard subscription", stored.size());
-        }
-        for (ReviewEvent event : stored) {
-            writeSseFrame(out, event);
-        }
-        out.flush();
-    }
-
-    private void replayStoredEvents(OutputStream out, String repo, long since) throws Exception {
-        List<ReviewEvent> stored = eventRepository.queryEvents(repo, since, Integer.MAX_VALUE);
-        if (!stored.isEmpty()) {
-            log.info("Replaying {} stored event(s) for repo='{}' since={}", stored.size(), repo, since);
-        }
-        for (ReviewEvent event : stored) {
-            writeSseFrame(out, event);
-        }
-        out.flush();
     }
 
     private static final byte[] KEEP_ALIVE_FRAME = ":\n\n".getBytes(StandardCharsets.UTF_8);
@@ -191,10 +120,14 @@ public final class SseHandler implements HttpHandler {
     }
 
     private void writeSseFrame(OutputStream out, ReviewEvent event) throws IOException {
-        String frame = "id: " + event.sequenceNo() + "\n"
-                + "event: " + event.eventType().name() + "\n"
+        String frame = "event: " + event.eventType().name() + "\n"
                 + "data: " + gson.toJson(event) + "\n\n";
+        long start = System.nanoTime();
         out.write(frame.getBytes(StandardCharsets.UTF_8));
+        if (metrics != null) {
+            metrics.recordSseWriteLatency((System.nanoTime() - start) / 1_000_000);
+            metrics.recordSseEvent();
+        }
     }
 
     private void sendError(HttpExchange exchange, int status, String json) throws IOException {
@@ -203,24 +136,6 @@ public final class SseHandler implements HttpHandler {
         exchange.sendResponseHeaders(status, body.length);
         exchange.getResponseBody().write(body);
         exchange.getResponseBody().close();
-    }
-
-    private long parseSince(HttpExchange exchange) {
-        String sinceParam = getParam(exchange, PARAM_SINCE);
-        if (sinceParam != null) {
-            try {
-                return Long.parseLong(sinceParam);
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        String lastEventId = exchange.getRequestHeaders().getFirst(HEADER_LAST_EVENT_ID);
-        if (lastEventId != null) {
-            try {
-                return Long.parseLong(lastEventId);
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return 0;
     }
 
     private String getParam(HttpExchange exchange, String name) {
@@ -287,4 +202,3 @@ public final class SseHandler implements HttpHandler {
         }
     }
 }
-

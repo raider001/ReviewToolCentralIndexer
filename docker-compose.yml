@@ -14,9 +14,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       BEARER_TOKEN: ${BEARER_TOKEN}
       GITHUB_API_TOKEN: ${GITHUB_API_TOKEN}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
     volumes:
       - ./plugins:/app/plugins
       - ./config.json:/app/config.json
+      - ./repositories.json:/app/repositories.json
     depends_on:
       - postgres
     restart: unless-stopped

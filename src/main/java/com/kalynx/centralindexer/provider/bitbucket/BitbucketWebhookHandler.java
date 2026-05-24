@@ -54,7 +54,7 @@ public final class BitbucketWebhookHandler implements WebhookHandler {
 
     @Override
     public void handle(Map<String, String> headers, byte[] rawBody) {
-        String eventKey = headers.getOrDefault("x-event-key", headers.get("X-Event-Key"));
+        String eventKey = headers.get("x-event-key");
         if (eventKey == null || (!eventKey.startsWith("repo:push")
                 && !eventKey.startsWith("repo:refs_changed"))) {
             return;
@@ -65,7 +65,7 @@ public final class BitbucketWebhookHandler implements WebhookHandler {
 
         String repoName = extractRepoName(json);
         String secret = resolveSecret(repoName);
-        String sigHeader = headers.getOrDefault("x-hub-signature", headers.get("X-Hub-Signature"));
+        String sigHeader = headers.get("x-hub-signature");
 
         if (sigHeader != null) {
             if (!HmacSignatureVerifier.verify(secret, rawBody, sigHeader)) {
@@ -77,19 +77,20 @@ public final class BitbucketWebhookHandler implements WebhookHandler {
             return;
         }
 
-        String deliveryId = headers.getOrDefault("x-request-uuid", headers.get("X-Request-UUID"));
-        processPayload(json, repoName, deliveryId);
+        String deliveryId = headers.get("x-request-uuid");
+        String repoUrl = extractRepoUrl(json);
+        processPayload(json, repoName, repoUrl, deliveryId);
     }
 
-    private void processPayload(JsonObject json, String repoName, String deliveryId) {
+    private void processPayload(JsonObject json, String repoName, String repoUrl, String deliveryId) {
         if (json.has("push")) {
-            processCloudPayload(json, repoName, deliveryId);
+            processCloudPayload(json, repoName, repoUrl, deliveryId);
         } else if (json.has("refChanges")) {
-            processDataCenterPayload(json, repoName, deliveryId);
+            processDataCenterPayload(json, repoName, repoUrl, deliveryId);
         }
     }
 
-    private void processCloudPayload(JsonObject json, String repoName, String deliveryId) {
+    private void processCloudPayload(JsonObject json, String repoName, String repoUrl, String deliveryId) {
         JsonArray changes = json.getAsJsonObject("push").getAsJsonArray("changes");
         for (JsonElement el : changes) {
             JsonObject change = el.getAsJsonObject();
@@ -111,11 +112,11 @@ public final class BitbucketWebhookHandler implements WebhookHandler {
             }
             Instant timestamp = extractCloudTimestamp(change);
             String actor = extractCloudActor(json);
-            processRef(ref, repoName, actor, timestamp, headSha, deleted, deliveryId);
+            processRef(ref, repoName, repoUrl, actor, timestamp, headSha, deleted, deliveryId);
         }
     }
 
-    private void processDataCenterPayload(JsonObject json, String repoName, String deliveryId) {
+    private void processDataCenterPayload(JsonObject json, String repoName, String repoUrl, String deliveryId) {
         JsonArray changes = json.getAsJsonArray("refChanges");
         for (JsonElement el : changes) {
             JsonObject change = el.getAsJsonObject();
@@ -124,23 +125,23 @@ public final class BitbucketWebhookHandler implements WebhookHandler {
             String headSha = deleted ? null : change.get("toHash").getAsString();
             String actor = json.has("actor")
                     ? json.getAsJsonObject("actor").get("name").getAsString() : null;
-            processRef(ref, repoName, actor, Instant.now(), headSha, deleted, deliveryId);
+            processRef(ref, repoName, repoUrl, actor, Instant.now(), headSha, deleted, deliveryId);
         }
     }
 
-    private void processRef(String ref, String repo, String actor, Instant timestamp,
+    private void processRef(String ref, String repo, String repoUrl, String actor, Instant timestamp,
                              String headSha, boolean deleted, String deliveryId) {
         ParsedRef parsed = ReviewRefParser.parse(ref);
         if (parsed == null) {
             return;
         }
-        ReviewEvent event = buildEvent(parsed, repo, actor, timestamp, headSha, deleted, deliveryId);
+        ReviewEvent event = buildEvent(parsed, repo, repoUrl, actor, timestamp, headSha, deleted, deliveryId);
         if (event != null) {
             submit(event);
         }
     }
 
-    private ReviewEvent buildEvent(ParsedRef parsed, String repo, String actor,
+    private ReviewEvent buildEvent(ParsedRef parsed, String repo, String repoUrl, String actor,
                                    Instant timestamp, String headSha, boolean deleted,
                                    String deliveryId) {
         switch (parsed.type()) {
@@ -154,8 +155,8 @@ public final class BitbucketWebhookHandler implements WebhookHandler {
             case HEADS -> {
                 EventType type = deleted ? EventType.BRANCH_DELETED : EventType.BRANCH_UPDATED;
                 Map<String, String> payload = (!deleted && headSha != null)
-                        ? Map.of("branch", parsed.branch(), "headSha", headSha)
-                        : Map.of("branch", parsed.branch());
+                        ? Map.of("repository_url", repoUrl, "branch_name", parsed.branch(), "head_commit", headSha)
+                        : Map.of("repository_url", repoUrl, "branch_name", parsed.branch());
                 return new ReviewEvent(0L, timestamp, repo, type,
                         null, actor, deliveryId, payload);
             }
@@ -212,6 +213,34 @@ public final class BitbucketWebhookHandler implements WebhookHandler {
             return perRepo;
         }
         return config.properties().getOrDefault("webhookSecret", "");
+    }
+
+    private String extractRepoUrl(JsonObject json) {
+        JsonObject repository = json.getAsJsonObject("repository");
+        // Bitbucket Cloud: links.clone[].href
+        if (repository.has("links") && !repository.get("links").isJsonNull()) {
+            JsonObject links = repository.getAsJsonObject("links");
+            if (links.has("clone") && links.get("clone").isJsonArray()) {
+                JsonArray cloneLinks = links.getAsJsonArray("clone");
+                for (int i = 0; i < cloneLinks.size(); i++) {
+                    JsonObject link = cloneLinks.get(i).getAsJsonObject();
+                    if (link.has("name") && "https".equals(link.get("name").getAsString())) {
+                        return link.get("href").getAsString();
+                    }
+                }
+                // Fallback: first clone link
+                if (cloneLinks.size() > 0) {
+                    return cloneLinks.get(0).getAsJsonObject().get("href").getAsString();
+                }
+            }
+        }
+        // Bitbucket Data Center / fallback: construct from repository info
+        if (repository.has("slug") && !repository.get("slug").isJsonNull()) {
+            String slug = repository.get("slug").getAsString();
+            // Note: This requires base URL configuration; fallback to slug
+            return "https://bitbucket.org/" + slug;
+        }
+        return "https://bitbucket.org/unknown";
     }
 }
 

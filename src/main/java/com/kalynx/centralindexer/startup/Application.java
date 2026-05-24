@@ -2,37 +2,35 @@ package com.kalynx.centralindexer.startup;
 
 import com.kalynx.centralindexer.config.AppConfig;
 import com.kalynx.centralindexer.config.PluginSettings;
+import com.kalynx.centralindexer.config.RepositoriesFileLoader;
+import com.kalynx.centralindexer.config.RepositoriesFileWatcher;
+import com.kalynx.centralindexer.config.RepositoryConfig;
+import com.kalynx.centralindexer.db.BranchRepository;
 import com.kalynx.centralindexer.db.ConnectionPool;
-import com.kalynx.centralindexer.db.EventRepository;
+import com.kalynx.centralindexer.db.RepositoriesRepository;
+import com.kalynx.centralindexer.db.ReviewsIndexRepository;
 import com.kalynx.centralindexer.http.IndexerHttpServer;
 import com.kalynx.centralindexer.plugin.EventSinkImpl;
 import com.kalynx.centralindexer.plugin.PluginLoader;
-import com.kalynx.centralindexer.plugin.RetryQueue;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.spi.ProviderConfig;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
-import com.kalynx.centralindexer.sse.ListenThread;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.SQLException;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Orchestrates the full application startup sequence.
  *
- * <p>The order is mandated by behaviour 7.1:
+ * <p>The startup order is:
  * <ol>
- *   <li>Start the {@link RetryQueue} so in-flight events can be accepted from the
- *       first webhook request.</li>
  *   <li>Start the provider plugin via {@link ProviderPlugin#start}.</li>
- *   <li>Run {@link ReconciliationRunner} — blocks until all per-repository calls complete
- *       or time out.</li>
- *   <li>Start the {@link ListenThread} for live {@code pg_notify} delivery.</li>
- *   <li>Start the {@link PruneScheduler} for periodic event cleanup.</li>
- *   <li>Create and start the {@link IndexerHttpServer} — the TCP port is only bound here,
- *       so clients cannot connect before reconciliation completes.</li>
+ *   <li>Create and start the {@link IndexerHttpServer} — the TCP port is only bound here.</li>
  * </ol>
  */
 public final class Application {
@@ -41,39 +39,28 @@ public final class Application {
 
     private final AppConfig config;
     private final ConnectionPool pool;
-    private final EventRepository repository;
     private final ProviderPlugin plugin;
     private final WebhookRouterImpl router;
     private final PublisherRegistry registry;
-    private final ListenThread listenThread;
-    private final PruneScheduler pruneScheduler;
-    private final RetryQueue retryQueue;
 
     private IndexerHttpServer server;
 
     /**
      * Constructs an {@code Application} with all required dependencies.
      *
-     * @param config     the application configuration
-     * @param pool       the database connection pool (used by the HTTP health check)
-     * @param repository the event repository
-     * @param plugin     the provider plugin, already loaded and validated
-     * @param router     the webhook router
-     * @param registry   the SSE publisher registry
+     * @param config   the application configuration
+     * @param pool     the database connection pool (used by the HTTP health check)
+     * @param plugin   the provider plugin, already loaded and validated
+     * @param router   the webhook router
+     * @param registry the SSE publisher registry
      */
-    public Application(AppConfig config, ConnectionPool pool, EventRepository repository,
-                       ProviderPlugin plugin, WebhookRouterImpl router, PublisherRegistry registry) {
+    public Application(AppConfig config, ConnectionPool pool, ProviderPlugin plugin,
+                       WebhookRouterImpl router, PublisherRegistry registry) {
         this.config = config;
         this.pool = pool;
-        this.repository = repository;
         this.plugin = plugin;
         this.router = router;
         this.registry = registry;
-        this.listenThread = new ListenThread(config.getDatabase(), registry);
-        this.pruneScheduler = new PruneScheduler(repository,
-                config.getIndexer().getRetentionDays(),
-                config.getIndexer().getPruneIntervalHours());
-        this.retryQueue = new RetryQueue(config.getIndexer().getRetryQueue(), repository, registry);
     }
 
     /**
@@ -83,38 +70,51 @@ public final class Application {
      * @throws Exception if any startup step fails
      */
     public void start() throws Exception {
-        retryQueue.start();
-        EventSinkImpl sink = new EventSinkImpl(repository, registry, retryQueue);
-        plugin.start(buildProviderConfig(), sink, router);
-        new ReconciliationRunner(config, repository, plugin).run();
-        listenThread.start();
-        pruneScheduler.start();
-        server = new IndexerHttpServer(config, pool, router, repository, registry);
+        RepositoriesRepository repositoriesRepository = new RepositoriesRepository(pool);
+        BranchRepository branchRepository = new BranchRepository(pool);
+        ReviewsIndexRepository reviewsRepository = new ReviewsIndexRepository(pool);
+
+        List<RepositoryConfig> repos = RepositoriesFileLoader.load();
+        seedRepositories(repositoriesRepository, repos);
+
+        EventSinkImpl sink = new EventSinkImpl(registry, branchRepository, reviewsRepository,
+                repositoriesRepository);
+        plugin.start(buildProviderConfig(repos), sink, router);
+
+        StartupReconciler reconciler = new StartupReconciler(repositoriesRepository, branchRepository, plugin);
+        reconciler.run();
+
+        sink.setNewRepositoryCallback(record ->
+            Thread.ofVirtual()
+                .name("repo-discover-" + record.owner() + "/" + record.repository())
+                .start(() -> reconciler.reconcileRepository(record)));
+
+        java.nio.file.Path reposFilePath = RepositoriesFileLoader.resolvePath();
+        RepositoriesFileWatcher watcher = new RepositoriesFileWatcher(
+                reposFilePath, repos, repositoriesRepository, branchRepository, plugin);
+        Thread.ofVirtual().name("repositories-file-watcher").start(watcher);
+        log.info("Watching '{}' for repository additions", reposFilePath.toAbsolutePath());
+
+        server = new IndexerHttpServer(config, pool, router, registry, branchRepository,
+                reviewsRepository, repositoriesRepository);
         server.start();
     }
 
     /**
-     * Stops the HTTP server, retry queue, listen thread, and prune scheduler.
+     * Stops the HTTP server and the provider plugin.
      */
     public void stop() {
         if (server != null) {
             server.stop();
         }
-        retryQueue.shutdown();
-        listenThread.stop();
-        pruneScheduler.shutdown();
     }
 
     /**
-     * Registers a JVM shutdown hook that stops all components in the mandated order
-     * defined by behaviour 10.5:
+     * Registers a JVM shutdown hook that stops all components in the mandated order:
      * <ol>
      *   <li>Stop accepting new HTTP requests.</li>
      *   <li>{@link PluginLoader#close()} — calls {@code plugin.stop()} then closes the
      *       {@code URLClassLoader}.</li>
-     *   <li>{@link PruneScheduler#shutdown()}.</li>
-     *   <li>{@link RetryQueue#shutdown()}.</li>
-     *   <li>{@link ListenThread#stop()}.</li>
      *   <li>{@link ConnectionPool#close()}.</li>
      * </ol>
      *
@@ -131,9 +131,6 @@ public final class Application {
             } catch (Exception e) {
                 log.warn("Error stopping plugin during shutdown", e);
             }
-            pruneScheduler.shutdown();
-            retryQueue.shutdown();
-            listenThread.stop();
             pool.close();
         }));
     }
@@ -148,12 +145,28 @@ public final class Application {
         return server == null ? -1 : server.getPort();
     }
 
-    private ProviderConfig buildProviderConfig() {
+    private void seedRepositories(RepositoriesRepository repo, List<RepositoryConfig> repos)
+            throws SQLException, InterruptedException {
+        if (repos.isEmpty()) {
+            log.debug("No repositories loaded — startup DB seed skipped");
+            return;
+        }
+        log.info("Seeding {} repository/repositories from repositories.json into DB", repos.size());
+        for (RepositoryConfig r : repos) {
+            repo.upsert(r.getOwner(), r.getRepository(), r.getUrl());
+            log.debug("Seeded repository: {}/{} url='{}'", r.getOwner(), r.getRepository(), r.getUrl());
+        }
+    }
+
+    private ProviderConfig buildProviderConfig(List<RepositoryConfig> repos) {
         PluginSettings pluginSettings = config.getPlugin();
+        List<String> repoNames = repos.stream()
+                .map(RepositoryConfig::ownerSlashRepo)
+                .toList();
         if (pluginSettings != null) {
             return new ProviderConfig(
                     pluginSettings.getProviderId(),
-                    config.getRepositories(),
+                    repoNames,
                     pluginSettings.getProperties());
         }
         return new ProviderConfig("noop", Collections.emptyList(), Map.of());
