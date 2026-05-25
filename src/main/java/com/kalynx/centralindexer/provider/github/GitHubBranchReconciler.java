@@ -46,10 +46,9 @@ import java.util.TreeMap;
  *   <li>{@code apiToken} — GitHub personal access token (required)</li>
  * </ul>
  */
-final class GitHubBranchReconciler {
+final class GitHubBranchReconciler extends AbstractGithubReconciler {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubBranchReconciler.class);
-    private static final String API_BASE = "https://api.github.com";
     private static final String REVIEWS_PATH_PREFIX = "reviews/";
     private static final int COMPARE_FILE_LIMIT = 250;
 
@@ -80,7 +79,7 @@ final class GitHubBranchReconciler {
             log.warn("No apiToken configured; cannot fetch kalynx-reviews HEAD for {}", repository);
             return null;
         }
-        String url = API_BASE + "/repos/" + repository + "/git/ref/heads/kalynx-reviews";
+        String url = getApiUrl() + "/repos/" + repository + "/git/ref/heads/kalynx-reviews";
         try {
             HttpRequest request = buildRequest(url, token);
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
@@ -135,7 +134,7 @@ final class GitHubBranchReconciler {
             log.warn("No apiToken configured; cannot reconcile {} from commit", repository);
             return false;
         }
-        String url = API_BASE + "/repos/" + repository + "/compare/" + fromCommit + "..." + toCommit;
+        String url = getApiUrl() + "/repos/" + repository + "/compare/" + fromCommit + "..." + toCommit;
         try {
             HttpRequest request = buildRequest(url, token);
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
@@ -181,7 +180,7 @@ final class GitHubBranchReconciler {
         int page = 1;
         int total = 0;
         while (true) {
-            String url = API_BASE + "/repos/" + repository + "/branches?per_page=100&page=" + page;
+            String url = getApiUrl() + "/repos/" + repository + "/branches?per_page=100&page=" + page;
             String body = fetchGet(url, token);
             if (body == null) break;
             JsonArray branches = JsonParser.parseString(body).getAsJsonArray();
@@ -227,7 +226,7 @@ final class GitHubBranchReconciler {
             log.warn("No apiToken configured; cannot reconcile full review tree for {}", repository);
             return false;
         }
-        String url = API_BASE + "/repos/" + repository + "/git/trees/" + headCommit + "?recursive=1";
+        String url = getApiUrl() + "/repos/" + repository + "/git/trees/" + headCommit + "?recursive=1";
         String body = fetchGet(url, token);
         if (body == null) return false;
 
@@ -322,7 +321,7 @@ final class GitHubBranchReconciler {
 
     /** Fetches a git blob and returns the {@code data} value from the last non-empty NDJSON line. */
     private String fetchLastNdjsonData(String repository, String blobSha, String token) {
-        String url = API_BASE + "/repos/" + repository + "/git/blobs/" + blobSha;
+        String url = getApiUrl() + "/repos/" + repository + "/git/blobs/" + blobSha;
         String body = fetchGet(url, token);
         if (body == null) return null;
         try {

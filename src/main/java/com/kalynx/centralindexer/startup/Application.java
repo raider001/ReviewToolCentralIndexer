@@ -86,7 +86,7 @@ public final class Application {
                 repositoriesRepository);
         plugin.start(buildProviderConfig(repos), sink, router);
 
-        StartupReconciler reconciler = new StartupReconciler(repositoriesRepository, branchRepository, plugin);
+        StartupReconciler reconciler = new StartupReconciler(repositoriesRepository, plugin);
         reconciler.run();
 
         sink.setNewRepositoryCallback(record ->
@@ -94,9 +94,22 @@ public final class Application {
                 .name("repo-discover-" + record.owner() + "/" + record.repository())
                 .start(() -> reconciler.reconcileRepository(record)));
 
+        sink.setKalynxReviewsUpdateCallback((owner, repo) ->
+            Thread.ofVirtual()
+                .name("kalynx-reviews-live-" + owner + "/" + repo)
+                .start(() -> {
+                    try {
+                        repositoriesRepository.findByOwnerAndRepository(owner, repo)
+                                .ifPresent(reconciler::reconcileKalynxReviews);
+                    } catch (Exception e) {
+                        log.warn("kalynx-reviews live reconciliation failed for {}/{}: {}",
+                                owner, repo, e.getMessage());
+                    }
+                }));
+
         java.nio.file.Path reposFilePath = RepositoriesFileLoader.resolvePath();
         RepositoriesFileWatcher watcher = new RepositoriesFileWatcher(
-                reposFilePath, repos, repositoriesRepository, branchRepository, plugin);
+                reposFilePath, repos, repositoriesRepository, plugin);
         Thread.ofVirtual().name("repositories-file-watcher").start(watcher);
         log.info("Watching '{}' for repository additions", reposFilePath.toAbsolutePath());
 

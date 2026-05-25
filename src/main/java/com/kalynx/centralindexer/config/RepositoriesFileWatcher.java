@@ -1,6 +1,5 @@
 package com.kalynx.centralindexer.config;
 
-import com.kalynx.centralindexer.db.BranchRepository;
 import com.kalynx.centralindexer.db.RepositoriesRepository;
 import com.kalynx.centralindexer.db.RepositoryRecord;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
@@ -42,7 +41,6 @@ public final class RepositoriesFileWatcher implements Runnable {
 
     private final Path filePath;
     private final RepositoriesRepository repositoriesRepository;
-    private final BranchRepository branchRepository;
     private final ProviderPlugin plugin;
 
     private final Set<String> knownRepositories;
@@ -53,17 +51,14 @@ public final class RepositoriesFileWatcher implements Runnable {
      * @param filePath               absolute, normalised path to {@code repositories.json}
      * @param initialRepos           the repository list already loaded at startup
      * @param repositoriesRepository repository DB operations
-     * @param branchRepository       branch DB operations
      * @param plugin                 provider plugin used for reconciliation
      */
     public RepositoriesFileWatcher(Path filePath,
                                     List<RepositoryConfig> initialRepos,
                                     RepositoriesRepository repositoriesRepository,
-                                    BranchRepository branchRepository,
                                     ProviderPlugin plugin) {
         this.filePath = filePath.toAbsolutePath().normalize();
         this.repositoriesRepository = repositoriesRepository;
-        this.branchRepository = branchRepository;
         this.plugin = plugin;
         this.knownRepositories = initialRepos.stream()
                 .map(RepositoryConfig::ownerSlashRepo)
@@ -154,7 +149,7 @@ public final class RepositoriesFileWatcher implements Runnable {
 
             RepositoryRecord record = new RepositoryRecord(
                     repo.getOwner(), repo.getRepository(), repo.getUrl(), null);
-            new StartupReconciler(repositoriesRepository, branchRepository, plugin)
+            new StartupReconciler(repositoriesRepository, plugin)
                     .reconcileRepository(record);
 
             log.info("Repository '{}' onboarded successfully", repo.ownerSlashRepo());

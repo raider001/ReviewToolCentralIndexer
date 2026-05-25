@@ -1,6 +1,5 @@
 package com.kalynx.centralindexer.startup;
 
-import com.kalynx.centralindexer.db.BranchRepository;
 import com.kalynx.centralindexer.db.RepositoriesRepository;
 import com.kalynx.centralindexer.db.RepositoryRecord;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
@@ -9,7 +8,6 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Performs commit-based startup reconciliation for all tracked repositories.
@@ -38,13 +36,10 @@ public final class StartupReconciler {
     private static final Logger log = LoggerFactory.getLogger(StartupReconciler.class);
 
     private final RepositoriesRepository repositoriesRepository;
-    private final BranchRepository branchRepository;
     private final ProviderPlugin plugin;
 
-    public StartupReconciler(RepositoriesRepository repositoriesRepository,
-                              BranchRepository branchRepository, ProviderPlugin plugin) {
+    public StartupReconciler(RepositoriesRepository repositoriesRepository, ProviderPlugin plugin) {
         this.repositoriesRepository = repositoriesRepository;
-        this.branchRepository = branchRepository;
         this.plugin = plugin;
     }
 
@@ -81,15 +76,26 @@ public final class StartupReconciler {
                     repoPath, e.getMessage());
         }
 
-        // Commit-based review reconciliation — read kalynx-reviews HEAD from DB (written by reconcileAllBranches).
+        reconcileKalynxReviews(repo);
+    }
+
+    /**
+     * Reconciles the {@code kalynx-reviews} orphan branch for one repository.
+     * Fetches the live HEAD directly from the provider plugin (not from the {@code branches}
+     * table, which never contains orphan branches), then replays any missed commits.
+     *
+     * <p>Safe to call outside the startup sequence — used by the live-update path when a
+     * {@code kalynx-reviews} push webhook arrives.
+     */
+    public void reconcileKalynxReviews(RepositoryRecord repo) {
+        String repoPath = repo.owner() + "/" + repo.repository();
         try {
-            Optional<String> liveHeadOpt = branchRepository.findHeadCommit(
-                    repo.owner(), repo.repository(), "kalynx-reviews");
-            if (liveHeadOpt.isEmpty()) {
-                log.debug("{}: kalynx-reviews branch not found — review reconciliation skipped", repoPath);
+            String liveHead = plugin.fetchKalynxReviewHead(repoPath);
+            if (liveHead == null) {
+                log.debug("{}: kalynx-reviews branch not found or plugin does not support fetch " +
+                          "— review reconciliation skipped", repoPath);
                 return;
             }
-            String liveHead = liveHeadOpt.get();
 
             String storedHead = repo.kalynxReviewHead();
             if (storedHead == null) {

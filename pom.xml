@@ -24,6 +24,16 @@
             <version>1.0.0</version>
         </dependency>
         <dependency>
+            <groupId>com.kalynx</groupId>
+            <artifactId>kalynx-swing-custom-theme</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.miglayout</groupId>
+            <artifactId>miglayout-swing</artifactId>
+            <version>11.2</version>
+        </dependency>
+        <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <version>42.7.3</version>

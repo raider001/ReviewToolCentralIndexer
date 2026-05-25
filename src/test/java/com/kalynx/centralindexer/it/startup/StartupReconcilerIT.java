@@ -1,7 +1,6 @@
 package com.kalynx.centralindexer.it.startup;
 
 import com.kalynx.centralindexer.config.DatabaseConfig;
-import com.kalynx.centralindexer.db.BranchRepository;
 import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.DatabaseInitializer;
 import com.kalynx.centralindexer.db.RepositoriesRepository;
@@ -31,8 +30,9 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>A {@link TrackingPlugin} captures calls to {@link ProviderPlugin#reconcileFromCommit}
  * and {@link ProviderPlugin#reconcileFullReviewTree} without real provider API access.
- * The {@code kalynx-reviews} HEAD is seeded directly into the {@code branches} table
- * (as {@link ProviderPlugin#reconcileAllBranches} would do at runtime).
+ * The live {@code kalynx-reviews} HEAD is supplied via {@link TrackingPlugin#liveHeads},
+ * which {@link TrackingPlugin#fetchKalynxReviewHead} returns — mirroring the real plugin
+ * that queries the provider API directly rather than the {@code branches} DB table.
  */
 @RequiresDocker
 class StartupReconcilerIT {
@@ -40,7 +40,6 @@ class StartupReconcilerIT {
     private PostgresTestContainer container;
     private ConnectionPool pool;
     private RepositoriesRepository repo;
-    private BranchRepository branchRepository;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -48,7 +47,6 @@ class StartupReconcilerIT {
         pool = buildPool(container);
         new DatabaseInitializer(pool).init();
         repo = new RepositoriesRepository(pool);
-        branchRepository = new BranchRepository(pool);
     }
 
     @AfterEach
@@ -61,7 +59,7 @@ class StartupReconcilerIT {
     void doesNothingWhenNoRepositoriesAreRegistered() throws Exception {
         TrackingPlugin plugin = new TrackingPlugin();
 
-        new StartupReconciler(repo, branchRepository, plugin).run();
+        new StartupReconciler(repo, plugin).run();
 
         assertTrue(plugin.reconcileFromCommitCalls.isEmpty());
     }
@@ -69,10 +67,10 @@ class StartupReconcilerIT {
     @Test
     void initialisesHeadAndSkipsReconciliationOnFirstRun() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
-        insertBranch("owner", "repo", "kalynx-reviews", "livesha1234567");
         TrackingPlugin plugin = new TrackingPlugin();
+        plugin.liveHeads.put("owner/repo", "livesha1234567");
 
-        new StartupReconciler(repo, branchRepository, plugin).run();
+        new StartupReconciler(repo, plugin).run();
 
         assertTrue(plugin.reconcileFromCommitCalls.isEmpty(), "reconcileFromCommit must not be called on first run");
         assertTrue(plugin.reconcileFullReviewTreeCalls.contains("owner/repo:livesha1234567"),
@@ -84,10 +82,10 @@ class StartupReconcilerIT {
     void reconcilesCursorWhenHeadsDiffer() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
         repo.updateKalynxReviewHead("owner", "repo", "oldsha1234567");
-        insertBranch("owner", "repo", "kalynx-reviews", "newsha1234567");
         TrackingPlugin plugin = new TrackingPlugin();
+        plugin.liveHeads.put("owner/repo", "newsha1234567");
 
-        new StartupReconciler(repo, branchRepository, plugin).run();
+        new StartupReconciler(repo, plugin).run();
 
         assertEquals(1, plugin.reconcileFromCommitCalls.size());
         assertEquals("owner/repo:oldsha1234567:newsha1234567", plugin.reconcileFromCommitCalls.get(0));
@@ -98,23 +96,23 @@ class StartupReconcilerIT {
     void doesNothingWhenStoredAndLiveHeadsMatch() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
         repo.updateKalynxReviewHead("owner", "repo", "samehead");
-        insertBranch("owner", "repo", "kalynx-reviews", "samehead");
         TrackingPlugin plugin = new TrackingPlugin();
+        plugin.liveHeads.put("owner/repo", "samehead");
 
-        new StartupReconciler(repo, branchRepository, plugin).run();
+        new StartupReconciler(repo, plugin).run();
 
         assertTrue(plugin.reconcileFromCommitCalls.isEmpty());
         assertEquals("samehead", storedHead("owner", "repo")); // cursor unchanged
     }
 
     @Test
-    void skipsRepositoryWhenKalynxReviewsBranchNotPresent() throws Exception {
+    void skipsRepositoryWhenPluginReturnsNullHead() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
         repo.updateKalynxReviewHead("owner", "repo", "existingsha");
-        // No kalynx-reviews branch in branches table → review reconciliation is skipped
+        // No entry in liveHeads → plugin returns null → review reconciliation is skipped
         TrackingPlugin plugin = new TrackingPlugin();
 
-        new StartupReconciler(repo, branchRepository, plugin).run();
+        new StartupReconciler(repo, plugin).run();
 
         assertTrue(plugin.reconcileFromCommitCalls.isEmpty());
         assertEquals("existingsha", storedHead("owner", "repo")); // cursor must not change
@@ -126,11 +124,11 @@ class StartupReconcilerIT {
         insertRepository("owner", "repo-b", "https://example.com/b");
         repo.updateKalynxReviewHead("owner", "repo-a", "oldA");
         repo.updateKalynxReviewHead("owner", "repo-b", "oldB");
-        insertBranch("owner", "repo-a", "kalynx-reviews", "newA");
-        insertBranch("owner", "repo-b", "kalynx-reviews", "newB");
         TrackingPlugin plugin = new TrackingPlugin();
+        plugin.liveHeads.put("owner/repo-a", "newA");
+        plugin.liveHeads.put("owner/repo-b", "newB");
 
-        new StartupReconciler(repo, branchRepository, plugin).run();
+        new StartupReconciler(repo, plugin).run();
 
         assertEquals(2, plugin.reconcileFromCommitCalls.size());
         assertTrue(plugin.reconcileFromCommitCalls.contains("owner/repo-a:oldA:newA"));
@@ -145,8 +143,6 @@ class StartupReconcilerIT {
         insertRepository("owner", "repo-b", "https://example.com/b");
         repo.updateKalynxReviewHead("owner", "repo-a", "oldA");
         repo.updateKalynxReviewHead("owner", "repo-b", "oldB");
-        insertBranch("owner", "repo-a", "kalynx-reviews", "newA");
-        insertBranch("owner", "repo-b", "kalynx-reviews", "newB");
 
         TrackingPlugin plugin = new TrackingPlugin() {
             @Override
@@ -157,9 +153,10 @@ class StartupReconcilerIT {
                 return super.reconcileFromCommit(repository, fromCommit, toCommit);
             }
         };
+        plugin.liveHeads.put("owner/repo-a", "newA");
         plugin.liveHeads.put("owner/repo-b", "newB");
 
-        new StartupReconciler(repo, branchRepository, plugin).run();
+        new StartupReconciler(repo, plugin).run();
 
         // repo-a failed but repo-b should still have been reconciled
         assertEquals(1, plugin.reconcileFromCommitCalls.size());
@@ -181,11 +178,6 @@ class StartupReconcilerIT {
         } finally {
             pool.release(conn);
         }
-    }
-
-    private void insertBranch(String owner, String repository, String branchName, String headCommit)
-            throws Exception {
-        branchRepository.upsert(owner, repository, branchName, headCommit);
     }
 
     private String storedHead(String owner, String repository) throws Exception {
@@ -223,6 +215,11 @@ class StartupReconcilerIT {
         @Override public void start(ProviderConfig config, EventSink sink, WebhookRouter router) {}
         @Override public void reconcile(String repository, Instant since) {}
         @Override public void stop() {}
+
+        @Override
+        public String fetchKalynxReviewHead(String repository) {
+            return liveHeads.get(repository);
+        }
 
         @Override
         public boolean reconcileFromCommit(String repository, String fromCommit, String toCommit) {

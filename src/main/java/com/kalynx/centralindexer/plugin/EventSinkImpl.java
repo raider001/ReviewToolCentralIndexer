@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -50,6 +51,7 @@ public final class EventSinkImpl implements EventSink {
 
     private final Set<String> seenRepositories = ConcurrentHashMap.newKeySet();
     private volatile Consumer<RepositoryRecord> newRepositoryCallback;
+    private volatile BiConsumer<String, String> kalynxReviewsUpdateCallback;
 
     /**
      * Full constructor used in production startup.
@@ -78,6 +80,15 @@ public final class EventSinkImpl implements EventSink {
      */
     public void setNewRepositoryCallback(Consumer<RepositoryRecord> callback) {
         this.newRepositoryCallback = callback;
+    }
+
+    /**
+     * Registers a callback invoked whenever a {@code kalynx-reviews} branch push is persisted.
+     * The callback receives the repository {@code owner} and {@code repository} as separate strings.
+     * Used to trigger live review reconciliation without blocking the webhook response.
+     */
+    public void setKalynxReviewsUpdateCallback(BiConsumer<String, String> callback) {
+        this.kalynxReviewsUpdateCallback = callback;
     }
 
     @Override
@@ -162,6 +173,15 @@ public final class EventSinkImpl implements EventSink {
             log.warn("BRANCH_UPDATED for '{}' missing branch_name='{}' or head_commit='{}' — " +
                      "repository upserted but branch row skipped",
                     event.repository(), branchName, headCommit);
+        }
+
+        if ("kalynx-reviews".equals(branchName) && headCommit != null) {
+            BiConsumer<String, String> cb = kalynxReviewsUpdateCallback;
+            if (cb != null) {
+                log.info("kalynx-reviews push detected for '{}/{}' — triggering live review reconciliation",
+                        owner, repo);
+                cb.accept(owner, repo);
+            }
         }
     }
 

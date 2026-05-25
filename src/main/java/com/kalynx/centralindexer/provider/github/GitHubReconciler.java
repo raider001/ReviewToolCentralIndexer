@@ -37,10 +37,9 @@ import java.util.Map;
  *   <li>{@code apiToken} — GitHub personal access token (required for 5,000 req/h)</li>
  * </ul>
  */
-public final class GitHubReconciler {
+public final class GitHubReconciler extends AbstractGithubReconciler {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubReconciler.class);
-    private static final String API_BASE = "https://api.github.com";
 
     private final HttpClient http;
 
@@ -82,7 +81,7 @@ public final class GitHubReconciler {
         int page = 1;
         boolean keepPaging = true;
         while (keepPaging) {
-            String url = API_BASE + "/repos/" + repository + "/events?per_page=100&page=" + page;
+            String url = getApiUrl() + "/repos/" + repository + "/events?per_page=100&page=" + page;
             String body = fetchPage(url, token);
             if (body == null) {
                 break;
