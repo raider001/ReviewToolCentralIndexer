@@ -46,10 +46,10 @@ class GitHubBranchReconcilerTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void fetchKalynxReviewHead_returnsShaOn200() throws Exception {
+    void fetchKalynxReviewHead_status200_returnsSha() throws Exception {
         String sha = "abc1234567890abc1234567890abc1234567890ab";
         GitHubBranchReconciler reconciler = new GitHubBranchReconciler(
-                new FakeHttpClient(200, "{\"object\":{\"sha\":\"" + sha + "\"}}"));
+                new FakeHttpClient(200, "{\"object\":{\"sha\":\"" + sha + "\"}}"), null);
 
         String result = reconciler.fetchKalynxReviewHead(REPO, CONFIG);
 
@@ -57,25 +57,25 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void fetchKalynxReviewHead_returnsNullOn404() throws Exception {
+    void fetchKalynxReviewHead_status404_returnsNull() throws Exception {
         GitHubBranchReconciler reconciler = new GitHubBranchReconciler(
-                new FakeHttpClient(404, "Not Found"));
+                new FakeHttpClient(404, "Not Found"), null);
 
         assertNull(reconciler.fetchKalynxReviewHead(REPO, CONFIG));
     }
 
     @Test
-    void fetchKalynxReviewHead_returnsNullOnServerError() throws Exception {
+    void fetchKalynxReviewHead_serverError_returnsNull() throws Exception {
         GitHubBranchReconciler reconciler = new GitHubBranchReconciler(
-                new FakeHttpClient(503, "Service Unavailable"));
+                new FakeHttpClient(503, "Service Unavailable"), null);
 
         assertNull(reconciler.fetchKalynxReviewHead(REPO, CONFIG));
     }
 
     @Test
-    void fetchKalynxReviewHead_returnsNullWhenNoApiToken() throws Exception {
+    void fetchKalynxReviewHead_noApiToken_returnsNull() throws Exception {
         GitHubBranchReconciler reconciler = new GitHubBranchReconciler(
-                new FakeHttpClient(200, "{}"));
+                new FakeHttpClient(200, "{}"), null);
 
         assertNull(reconciler.fetchKalynxReviewHead(REPO, NO_TOKEN_CONFIG));
     }
@@ -85,7 +85,7 @@ class GitHubBranchReconcilerTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void reconcileFromCommit_emitsReviewCreatedForFirstTitleFile() {
+    void reconcileFromCommit_firstTitleFile_emitsReviewCreated() {
         String json = compareJson(List.of(
                 "reviews/rev-001/metadata/title"));
         List<ReviewEvent> events = reconcile(json);
@@ -97,7 +97,7 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void reconcileFromCommit_emitsReviewCommentAddedForCommentTextFile() {
+    void reconcileFromCommit_commentTextFile_emitsReviewCommentAdded() {
         String json = compareJson(List.of(
                 "reviews/rev-002/comments/c1/text"));
         List<ReviewEvent> events = reconcile(json);
@@ -107,7 +107,7 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void reconcileFromCommit_emitsReviewUpdatedForNonTitleFile() {
+    void reconcileFromCommit_nonTitleFile_emitsReviewUpdated() {
         String json = compareJson(List.of(
                 "reviews/rev-003/metadata/description"));
         List<ReviewEvent> events = reconcile(json);
@@ -117,7 +117,7 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void reconcileFromCommit_secondFileForSameReviewIsNotFirstOccurrence() {
+    void reconcileFromCommit_secondFileForSameReview_notFirstOccurrence() {
         // First file for rev-001 → REVIEW_CREATED (isFirst=true), second → REVIEW_UPDATED (isFirst=false)
         String json = compareJson(List.of(
                 "reviews/rev-001/metadata/title",
@@ -130,7 +130,7 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void reconcileFromCommit_distinctReviewsEachGetFirstOccurrenceTracking() {
+    void reconcileFromCommit_distinctReviews_eachTrackedAsFirstOccurrence() {
         String json = compareJson(List.of(
                 "reviews/rev-001/metadata/title",
                 "reviews/rev-002/metadata/title"));
@@ -142,7 +142,7 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void reconcileFromCommit_ignoresNonReviewPaths() {
+    void reconcileFromCommit_nonReviewPaths_ignored() {
         String json = compareJson(List.of(
                 ".gitkeep",
                 "reviews",
@@ -154,7 +154,7 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void reconcileFromCommit_ignoresPathWithNoStreamSegment() {
+    void reconcileFromCommit_pathWithNoStreamSegment_ignored() {
         // "reviews/rev-001" has no slash after the reviewId — must be skipped
         String json = compareJson(List.of("reviews/rev-001"));
         List<ReviewEvent> events = reconcile(json);
@@ -167,25 +167,25 @@ class GitHubBranchReconcilerTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void reconcileFromCommit_emitsNoEventsOnNonSuccessResponse() {
+    void reconcileFromCommit_nonSuccessResponse_emitsNoEvents() {
         List<ReviewEvent> events = new ArrayList<>();
-        new GitHubBranchReconciler(new FakeHttpClient(500, "error"))
+        new GitHubBranchReconciler(new FakeHttpClient(500, "error"), null)
                 .reconcileFromCommit(REPO, "from", "to", CONFIG, events::add);
 
         assertTrue(events.isEmpty());
     }
 
     @Test
-    void reconcileFromCommit_emitsNoEventsWhenNoApiToken() {
+    void reconcileFromCommit_noApiToken_emitsNoEvents() {
         List<ReviewEvent> events = new ArrayList<>();
-        new GitHubBranchReconciler(new FakeHttpClient(200, "{}"))
+        new GitHubBranchReconciler(new FakeHttpClient(200, "{}"), null)
                 .reconcileFromCommit(REPO, "from", "to", NO_TOKEN_CONFIG, events::add);
 
         assertTrue(events.isEmpty());
     }
 
     @Test
-    void reconcileFromCommit_handlesEmptyFilesArray() {
+    void reconcileFromCommit_emptyFilesArray_emitsNoEvents() {
         String json = """
                 {"status":"ahead","ahead_by":0,"commits":[],"files":[]}
                 """;
@@ -193,7 +193,7 @@ class GitHubBranchReconcilerTest {
     }
 
     @Test
-    void reconcileFromCommit_handlesAbsentFilesKey() {
+    void reconcileFromCommit_absentFilesKey_emitsNoEvents() {
         String json = """
                 {"status":"ahead","ahead_by":0,"commits":[]}
                 """;
@@ -207,7 +207,7 @@ class GitHubBranchReconcilerTest {
     private List<ReviewEvent> reconcile(String compareResponseJson) {
         List<ReviewEvent> events = new ArrayList<>();
         EventSink sink = events::add;
-        new GitHubBranchReconciler(new FakeHttpClient(200, compareResponseJson))
+        new GitHubBranchReconciler(new FakeHttpClient(200, compareResponseJson), null)
                 .reconcileFromCommit(REPO, "fromsha", "tosha1234567890", CONFIG, sink);
         return events;
     }

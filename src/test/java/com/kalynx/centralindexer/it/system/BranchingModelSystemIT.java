@@ -1,12 +1,15 @@
 package com.kalynx.centralindexer.it.system;
 
-import com.kalynx.centralindexer.backfill.BackfillBranchesTool;
-import com.kalynx.centralindexer.backfill.BackfillOptions;
 import com.kalynx.centralindexer.config.AppConfig;
 import com.kalynx.centralindexer.config.DatabaseConfig;
+import com.kalynx.centralindexer.db.BranchRepository;
+import com.kalynx.centralindexer.db.CommentsIndexRepository;
 import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.DatabaseInitializer;
+import com.kalynx.centralindexer.db.RepositoriesRepository;
+import com.kalynx.centralindexer.db.ReviewsIndexRepository;
 import com.kalynx.centralindexer.it.support.PostgresTestContainer;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.it.support.RequiresDocker;
 import com.kalynx.centralindexer.json.GsonFactory;
 import com.kalynx.centralindexer.model.EventType;
@@ -30,6 +33,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.UUID;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -86,7 +91,7 @@ class BranchingModelSystemIT {
     // -----------------------------------------------------------------------
 
     @Test
-    void fullConnectSequenceReturnsSeedReviewAndBranches() throws Exception {
+    void fullConnectSequence_seedReviewAndBranches_returnsBothInResponse() throws Exception {
         // Field name must match RepoEntry.repositoryUrl (GSON uses Java field name)
         String reposJson = "[{\"owner\":\"" + OWNER + "\",\"repository\":\"" + REPO + "\"," +
                 "\"branchName\":\"" + BRANCH + "\",\"headCommit\":\"" + HEAD + "\"," +
@@ -122,7 +127,7 @@ class BranchingModelSystemIT {
     // -----------------------------------------------------------------------
 
     @Test
-    void branchUpdatedEventDeliveredOverSseWithRoutingKeys() throws Exception {
+    void publish_branchUpdatedEvent_deliveredOverSseWithRoutingKeys() throws Exception {
         PublisherRegistry registry = new PublisherRegistry();
         app = buildAndStartApp(registry);
 
@@ -154,7 +159,7 @@ class BranchingModelSystemIT {
     // -----------------------------------------------------------------------
 
     @Test
-    void reviewCreatedEventDeliveredOverSse() throws Exception {
+    void publish_reviewCreatedEvent_deliveredOverSse() throws Exception {
         PublisherRegistry registry = new PublisherRegistry();
         app = buildAndStartApp(registry);
 
@@ -179,7 +184,7 @@ class BranchingModelSystemIT {
     // -----------------------------------------------------------------------
 
     @Test
-    void branchDeletedEventDeliveredOverSse() throws Exception {
+    void publish_branchDeletedEvent_deliveredOverSse() throws Exception {
         PublisherRegistry registry = new PublisherRegistry();
         app = buildAndStartApp(registry);
 
@@ -203,32 +208,11 @@ class BranchingModelSystemIT {
     }
 
     // -----------------------------------------------------------------------
-    // 5. Backfill before startup populates GET /reviews
+    // 5. GET /branches prefix filtering
     // -----------------------------------------------------------------------
 
     @Test
-    void backfillBeforeStartupPopulatesGetReviewsRepositories() throws Exception {
-        seedReview(REVIEW_ID, null);
-        seedRepository(OWNER, REPO, REPO_URL);
-        seedBranch(OWNER, REPO, BRANCH, HEAD);
-        seedReviewBranch(REVIEW_ID, OWNER, REPO, BRANCH);
-
-        new BackfillBranchesTool(pool).run(BackfillOptions.asFullRun());
-
-        app = buildAndStartApp();
-        String body = getJson(app.getPort(), "/reviews");
-
-        // GET /reviews exposes repository_url and review_branch (headCommit is internal, not surfaced)
-        assertTrue(body.contains(REPO_URL), "GET /reviews must include repository URL after backfill");
-        assertTrue(body.contains(BRANCH),   "GET /reviews must include review_branch after backfill");
-    }
-
-    // -----------------------------------------------------------------------
-    // 6. GET /branches prefix filtering
-    // -----------------------------------------------------------------------
-
-    @Test
-    void getBranchesWithPrefixReturnsOnlyMatching() throws Exception {
+    void getBranches_prefixFilter_returnsOnlyMatchingBranches() throws Exception {
         seedRepository(OWNER, REPO, REPO_URL);
         seedBranch(OWNER, REPO, "feature/alpha", "aaa111");
         seedBranch(OWNER, REPO, "feature/beta",  "bbb222");
@@ -272,7 +256,9 @@ class BranchingModelSystemIT {
 
         Application application = new Application(
                 config, pool, noopPlugin, new WebhookRouterImpl(), registry,
-                new com.kalynx.centralindexer.metrics.MetricsCollector(pool));
+                new MetricsCollector(pool),
+                new RepositoriesRepository(pool), new BranchRepository(pool),
+                new ReviewsIndexRepository(pool), new CommentsIndexRepository(pool));
         application.start();
         return application;
     }
@@ -353,14 +339,16 @@ class BranchingModelSystemIT {
     private void seedBranch(String owner, String repo, String branch, String headCommit)
             throws Exception {
         Connection conn = pool.acquire();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO branches (owner, repository, branch_name, head_commit) " +
-                "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
-            ps.setString(1, owner);
-            ps.setString(2, repo);
-            ps.setString(3, branch);
-            ps.setString(4, headCommit);
-            ps.executeUpdate();
+        try {
+            UUID repositoryId = lookupRepositoryId(conn, owner, repo);
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO branches (repository_id, branch_name, head_commit) " +
+                    "VALUES (?, ?, ?) ON CONFLICT DO NOTHING")) {
+                ps.setObject(1, repositoryId);
+                ps.setString(2, branch);
+                ps.setString(3, headCommit);
+                ps.executeUpdate();
+            }
         } finally {
             pool.release(conn);
         }
@@ -369,16 +357,30 @@ class BranchingModelSystemIT {
     private void seedReviewBranch(String reviewId, String owner, String repo, String branch)
             throws Exception {
         Connection conn = pool.acquire();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO review_branches (review_id, owner, repository, branch_name) " +
-                "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
-            ps.setString(1, reviewId);
-            ps.setString(2, owner);
-            ps.setString(3, repo);
-            ps.setString(4, branch);
-            ps.executeUpdate();
+        try {
+            UUID repositoryId = lookupRepositoryId(conn, owner, repo);
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO review_branches (review_id, repository_id, branch_name) " +
+                    "VALUES (?, ?, ?) ON CONFLICT DO NOTHING")) {
+                ps.setString(1, reviewId);
+                ps.setObject(2, repositoryId);
+                ps.setString(3, branch);
+                ps.executeUpdate();
+            }
         } finally {
             pool.release(conn);
+        }
+    }
+
+    private UUID lookupRepositoryId(Connection conn, String owner, String repo) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT repository_id FROM repositories WHERE owner = ? AND repository = ?")) {
+            ps.setString(1, owner);
+            ps.setString(2, repo);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject(1);
+            }
         }
     }
 

@@ -37,7 +37,7 @@ class ConfigLoaderTest {
     Path tempDir;
 
     @Test
-    void loadsFromSystemPropertyPath() throws IOException {
+    void load_systemPropertyPath_loadsConfig() throws IOException {
         Path configFile = writeConfig("system-prop.json", MINIMAL_JSON);
         String previous = System.getProperty("cri.config");
         try {
@@ -50,7 +50,7 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void systemPropertyTakesPriorityOverEnvVar() throws IOException {
+    void load_systemPropertyAndEnvVar_systemPropertyWins() throws IOException {
         Path systemPropertyFile = writeConfig("system-prop.json", MINIMAL_JSON);
         Path envVarFile = writeConfig("env-var.json", MINIMAL_JSON.replace("5432", "5433"));
         String previous = System.getProperty("cri.config");
@@ -66,7 +66,7 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void envVarTakesPriorityOverDefaultPath() throws IOException {
+    void load_envVarSet_loadsFromEnvVarPath() throws IOException {
         Path envVarFile = writeConfig("env-var.json", MINIMAL_JSON);
         String previousProperty = System.getProperty("cri.config");
         System.clearProperty("cri.config");
@@ -80,7 +80,7 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void substitutesEnvVars() throws IOException {
+    void load_envVarPlaceholder_substitutesValue() throws IOException {
         String json = MINIMAL_JSON.replace("\"secret\"", "\"${DB_PASS}\"");
         Path configFile = writeConfig("substitute.json", json);
         String previous = System.getProperty("cri.config");
@@ -95,7 +95,7 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void throwsOnMissingEnvVar() throws IOException {
+    void load_missingEnvVar_throwsIllegalState() throws IOException {
         String json = MINIMAL_JSON.replace("\"secret\"", "\"${MISSING_VAR}\"");
         Path configFile = writeConfig("missing-var.json", json);
         String previous = System.getProperty("cri.config");
@@ -112,7 +112,7 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void throwsOnInvalidJson() throws IOException {
+    void load_invalidJson_throwsConfigLoadException() throws IOException {
         Path configFile = writeConfig("invalid.json", "{ this is not valid json }");
         String previous = System.getProperty("cri.config");
         try {

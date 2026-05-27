@@ -14,7 +14,7 @@ class ReviewsIndexMapperTest {
     private final Gson gson = GsonFactory.getInstance();
 
     @Test
-    void toRepositoriesJsonProducesDeterministicOrderingAndShape() {
+    void toRepositoriesJson_unsortedInput_producesOrderedJson() {
         ReviewsIndexMapper.RepoEntry a = new ReviewsIndexMapper.RepoEntry(
                 "alice", "repo-a", "https://example/alice/repo-a", "develop", "deadbeef");
         ReviewsIndexMapper.RepoEntry b = new ReviewsIndexMapper.RepoEntry(

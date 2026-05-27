@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 class WebhookDispatcherTest {
 
     @Test
-    void routesToRegisteredHandler() throws Exception {
+    void handle_registeredSuffix_routesToHandler() throws Exception {
         WebhookRouterImpl router = mock(WebhookRouterImpl.class);
         when(router.dispatch(eq("push"), any(), any())).thenReturn(true);
 
@@ -39,7 +39,7 @@ class WebhookDispatcherTest {
     }
 
     @Test
-    void returns404ForUnknownSuffix() throws Exception {
+    void handle_unknownSuffix_returns404() throws Exception {
         WebhookRouterImpl router = mock(WebhookRouterImpl.class);
         when(router.dispatch(any(), any(), any())).thenReturn(false);
 
@@ -59,7 +59,7 @@ class WebhookDispatcherTest {
      */
     @Test
     @SuppressWarnings("unchecked")
-    void headerNamesAreLowercasedBeforeDispatch() throws Exception {
+    void handle_titleCaseHeaders_lowercasedBeforeDispatch() throws Exception {
         WebhookRouterImpl router = mock(WebhookRouterImpl.class);
         when(router.dispatch(any(), any(), any())).thenReturn(true);
 

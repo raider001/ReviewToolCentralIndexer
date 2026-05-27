@@ -1,5 +1,6 @@
 package com.kalynx.centralindexer.http;
 
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -29,14 +30,15 @@ public final class WebhookDispatcher implements HttpHandler {
     private static final String WEBHOOKS_PREFIX = "/webhooks/";
 
     private final WebhookRouterImpl router;
+    private final MetricsCollector  metrics;
 
-    /**
-     * Constructs a {@code WebhookDispatcher} backed by the given router.
-     *
-     * @param router the webhook router populated by the provider plugin
-     */
     public WebhookDispatcher(WebhookRouterImpl router) {
-        this.router = router;
+        this(router, null);
+    }
+
+    public WebhookDispatcher(WebhookRouterImpl router, MetricsCollector metrics) {
+        this.router  = router;
+        this.metrics = metrics;
     }
 
     @Override
@@ -55,6 +57,7 @@ public final class WebhookDispatcher implements HttpHandler {
         try {
             boolean dispatched = router.dispatch(suffix, headers, body);
             status = dispatched ? 200 : 404;
+            if (dispatched && metrics != null) metrics.recordWebhookCall(suffix);
             if (!dispatched) {
                 log.warn("No handler registered for webhook provider '{}'", suffix);
             }

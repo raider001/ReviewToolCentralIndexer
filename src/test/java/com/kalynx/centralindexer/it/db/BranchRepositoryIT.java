@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -46,7 +48,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void queryWithNoFiltersReturnsAllBranches() throws Exception {
+    void query_noFilters_returnsAllBranches() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         insertBranch("alice", "repo-a", "feature/foo", "aaa");
         insertBranch("alice", "repo-a", "main", "bbb");
@@ -62,7 +64,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void queryWithPrefixFiltersCorrectly() throws Exception {
+    void query_prefixFilter_filtersCorrectly() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         insertBranch("alice", "repo-a", "feature/foo", "aaa");
         insertBranch("alice", "repo-a", "feature/bar", "bbb");
@@ -77,7 +79,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void queryWithRepositoryFilterLimitsScope() throws Exception {
+    void query_repositoryFilter_limitsScope() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         insertRepository("bob", "repo-b", "https://example.com/b");
         insertBranch("alice", "repo-a", "main", "aaa");
@@ -91,7 +93,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void queryWithPrefixAndRepositoryFilter() throws Exception {
+    void query_prefixAndRepositoryFilter_returnsMatchingBranches() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         insertRepository("alice", "repo-b", "https://example.com/b");
         insertBranch("alice", "repo-a", "feature/a1", "aaa");
@@ -105,7 +107,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void cursorPaginatesCorrectly() throws Exception {
+    void query_validCursor_paginatesCorrectly() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         for (int i = 1; i <= 5; i++) {
             insertBranch("alice", "repo-a", "branch-0" + i, "sha" + i);
@@ -126,7 +128,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void cursorWithPrefixFilterPaginatesCorrectly() throws Exception {
+    void query_cursorWithPrefixFilter_paginatesCorrectly() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         insertBranch("alice", "repo-a", "feat-01", "sha1");
         insertBranch("alice", "repo-a", "feat-02", "sha2");
@@ -145,7 +147,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void prefixEscapesLikeSpecialChars() throws Exception {
+    void query_prefixWithSpecialChars_escapesLikeOperator() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         insertBranch("alice", "repo-a", "100%done", "sha1");
         insertBranch("alice", "repo-a", "feature/x", "sha2");
@@ -158,7 +160,7 @@ class BranchRepositoryIT {
     }
 
     @Test
-    void resultsOrderedByOwnerRepositoryBranchName() throws Exception {
+    void query_unorderedData_resultsOrderedByOwnerRepoAndBranch() throws Exception {
         insertRepository("bob", "z-repo", "https://example.com/z");
         insertRepository("alice", "a-repo", "https://example.com/a");
         insertBranch("bob", "z-repo", "main", "sha1");
@@ -191,13 +193,24 @@ class BranchRepositoryIT {
     private void insertBranch(String owner, String repository, String branchName,
                                String headCommit) throws Exception {
         Connection conn = pool.acquire();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO branches (owner, repository, branch_name, head_commit) VALUES (?, ?, ?, ?)")) {
-            ps.setString(1, owner);
-            ps.setString(2, repository);
-            ps.setString(3, branchName);
-            ps.setString(4, headCommit);
-            ps.executeUpdate();
+        try {
+            UUID repositoryId;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT repository_id FROM repositories WHERE owner = ? AND repository = ?")) {
+                ps.setString(1, owner);
+                ps.setString(2, repository);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    repositoryId = (UUID) rs.getObject(1);
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO branches (repository_id, branch_name, head_commit) VALUES (?, ?, ?)")) {
+                ps.setObject(1, repositoryId);
+                ps.setString(2, branchName);
+                ps.setString(3, headCommit);
+                ps.executeUpdate();
+            }
         } finally {
             pool.release(conn);
         }

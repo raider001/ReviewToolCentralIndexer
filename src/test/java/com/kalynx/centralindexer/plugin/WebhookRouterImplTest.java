@@ -16,7 +16,7 @@ import static org.mockito.Mockito.verify;
 class WebhookRouterImplTest {
 
     @Test
-    void registeredHandlerInvoked() {
+    void dispatch_registeredSuffix_invokesHandler() {
         WebhookHandler handler = mock(WebhookHandler.class);
         WebhookRouterImpl router = new WebhookRouterImpl();
         router.registerPost("push", handler);
@@ -30,7 +30,7 @@ class WebhookRouterImplTest {
     }
 
     @Test
-    void unknownSuffixReturnsFalse() {
+    void dispatch_unknownSuffix_returnsFalse() {
         WebhookRouterImpl router = new WebhookRouterImpl();
 
         boolean dispatched = router.dispatch("unknown", Map.of(), new byte[0]);

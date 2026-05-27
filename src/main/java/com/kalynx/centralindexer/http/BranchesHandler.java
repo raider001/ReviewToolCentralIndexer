@@ -106,7 +106,7 @@ public final class BranchesHandler implements HttpHandler {
         String cursorParam = getParam(exchange, "cursor");
         if (cursorParam != null) {
             cursor = decodeCursor(cursorParam);
-            if (cursor == null) {
+            if (cursor == null || cursor.length != 3) {
                 sendError(exchange, 400, "{\"error\":\"invalid cursor\"}");
                 return;
             }

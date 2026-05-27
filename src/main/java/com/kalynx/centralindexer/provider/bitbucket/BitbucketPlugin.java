@@ -1,5 +1,6 @@
 package com.kalynx.centralindexer.provider.bitbucket;
 
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.spi.ProviderConfig;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
@@ -31,9 +32,16 @@ public final class BitbucketPlugin implements ProviderPlugin {
 
     /**
      * Creates a {@code BitbucketPlugin} with the default HTTP-based reconciler.
+     *
+     * @param metrics the metrics collector for API call tracking; may be {@code null}
      */
+    public BitbucketPlugin(MetricsCollector metrics) {
+        this.reconciler = new BitbucketReconciler(metrics);
+    }
+
+    /** No-arg constructor for external plugin JAR loading via {@link java.util.ServiceLoader}. */
     public BitbucketPlugin() {
-        this.reconciler = new BitbucketReconciler();
+        this(null);
     }
 
     @Override

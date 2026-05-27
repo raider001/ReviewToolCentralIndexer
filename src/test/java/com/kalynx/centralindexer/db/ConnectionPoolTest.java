@@ -19,7 +19,7 @@ import static org.mockito.Mockito.mock;
 class ConnectionPoolTest {
 
     @Test
-    void poolSizeMatchesConfig() throws Exception {
+    void init_poolSizeFromConfig_blocksWhenExhausted() throws Exception {
         Connection connection1 = mock(Connection.class);
         Connection connection2 = mock(Connection.class);
         DatabaseConfig config = buildConfig(2);
@@ -49,7 +49,7 @@ class ConnectionPoolTest {
     }
 
     @Test
-    void releaseReturnsConnectionToPool() throws Exception {
+    void release_returnedConnection_reusedOnNextAcquire() throws Exception {
         Connection connection1 = mock(Connection.class);
         DatabaseConfig config = buildConfig(1);
         int[] callCount = {0};
@@ -69,7 +69,7 @@ class ConnectionPoolTest {
     }
 
     @Test
-    void throwsDataSourceExceptionWhenSupplierFails() {
+    void init_supplierFails_throwsDataSourceException() {
         DatabaseConfig config = buildConfig(1);
         assertThrows(DataSourceException.class, () ->
                 new ConnectionPool(config, () -> { throw new SQLException("Connection refused"); }));

@@ -66,7 +66,7 @@ class MetricsIT {
         assertTrue(body.contains("\"sse\""),       "must contain sse key");
         assertTrue(body.contains("\"db\""),        "must contain db key");
         assertTrue(body.contains("\"branches\""),  "must contain branches key");
-        assertTrue(body.contains("\"backfill\""),  "must contain backfill key");
+        assertTrue(body.contains("\"system\""),    "must contain system key");
     }
 
     @Test
@@ -87,13 +87,6 @@ class MetricsIT {
         assertTrue(body.contains("\"get_reviews_p95_ms\""));
         assertTrue(body.contains("\"pool_active_connections\""));
         assertTrue(body.contains("\"pool_waiting_threads\""));
-    }
-
-    @Test
-    void backfillProgressDefaultsToMinusOne() throws Exception {
-        HttpURLConnection conn = get("/metrics");
-        String body = readBody(conn);
-        assertTrue(body.contains("\"progress_pct\":-1.0"));
     }
 
     @Test

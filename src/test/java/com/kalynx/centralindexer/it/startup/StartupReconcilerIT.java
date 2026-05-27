@@ -56,7 +56,7 @@ class StartupReconcilerIT {
     }
 
     @Test
-    void doesNothingWhenNoRepositoriesAreRegistered() throws Exception {
+    void run_noRepositoriesRegistered_doesNothing() throws Exception {
         TrackingPlugin plugin = new TrackingPlugin();
 
         new StartupReconciler(repo, plugin).run();
@@ -65,7 +65,7 @@ class StartupReconcilerIT {
     }
 
     @Test
-    void initialisesHeadAndSkipsReconciliationOnFirstRun() throws Exception {
+    void run_noStoredHead_initialisesHeadAndSkipsIncremental() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
         TrackingPlugin plugin = new TrackingPlugin();
         plugin.liveHeads.put("owner/repo", "livesha1234567");
@@ -79,7 +79,7 @@ class StartupReconcilerIT {
     }
 
     @Test
-    void reconcilesCursorWhenHeadsDiffer() throws Exception {
+    void run_storedAndLiveHeadsDiffer_reconcilesCursor() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
         repo.updateKalynxReviewHead("owner", "repo", "oldsha1234567");
         TrackingPlugin plugin = new TrackingPlugin();
@@ -93,7 +93,7 @@ class StartupReconcilerIT {
     }
 
     @Test
-    void doesNothingWhenStoredAndLiveHeadsMatch() throws Exception {
+    void run_storedAndLiveHeadsMatch_doesNothing() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
         repo.updateKalynxReviewHead("owner", "repo", "samehead");
         TrackingPlugin plugin = new TrackingPlugin();
@@ -106,7 +106,7 @@ class StartupReconcilerIT {
     }
 
     @Test
-    void skipsRepositoryWhenPluginReturnsNullHead() throws Exception {
+    void run_pluginReturnsNullHead_skipsRepository() throws Exception {
         insertRepository("owner", "repo", "https://example.com");
         repo.updateKalynxReviewHead("owner", "repo", "existingsha");
         // No entry in liveHeads → plugin returns null → review reconciliation is skipped
@@ -119,7 +119,7 @@ class StartupReconcilerIT {
     }
 
     @Test
-    void processesAllRepositoriesIndependently() throws Exception {
+    void run_multipleRepositories_processesAllIndependently() throws Exception {
         insertRepository("owner", "repo-a", "https://example.com/a");
         insertRepository("owner", "repo-b", "https://example.com/b");
         repo.updateKalynxReviewHead("owner", "repo-a", "oldA");
@@ -138,7 +138,7 @@ class StartupReconcilerIT {
     }
 
     @Test
-    void continuesProcessingOtherReposWhenOnePluginCallFails() throws Exception {
+    void run_onePluginCallFails_continuesOtherRepos() throws Exception {
         insertRepository("owner", "repo-a", "https://example.com/a");
         insertRepository("owner", "repo-b", "https://example.com/b");
         repo.updateKalynxReviewHead("owner", "repo-a", "oldA");

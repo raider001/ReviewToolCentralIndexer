@@ -39,28 +39,28 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void noParamsReturns200() throws Exception {
+    void handle_noParams_returns200() throws Exception {
         HttpExchange exchange = buildExchange("/reviews", null);
         handler.handle(exchange);
         verify(exchange).sendResponseHeaders(eq(200), anyLong());
     }
 
     @Test
-    void noParamsPassesNullFiltersToRepository() throws Exception {
+    void handle_noParams_passesNullFiltersToRepository() throws Exception {
         HttpExchange exchange = buildExchange("/reviews", null);
         handler.handle(exchange);
         verify(repo).query(isNull(), isNull());
     }
 
     @Test
-    void invalidSinceReturns400() throws Exception {
+    void handle_invalidSince_returns400() throws Exception {
         HttpExchange exchange = buildExchange("/reviews", "since=not-a-date");
         handler.handle(exchange);
         verify(exchange).sendResponseHeaders(eq(400), anyLong());
     }
 
     @Test
-    void validSinceParsedAndPassedToRepository() throws Exception {
+    void handle_validSince_parsedAndPassedToRepository() throws Exception {
         Instant expected = Instant.parse("2026-01-01T00:00:00Z");
         HttpExchange exchange = buildExchange("/reviews", "since=2026-01-01T00%3A00%3A00Z");
         // Use unencoded form for simplicity — parseQuery splits on = only
@@ -70,21 +70,21 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void statusParamParsedAndPassedToRepository() throws Exception {
+    void handle_statusParam_parsedAndPassedToRepository() throws Exception {
         HttpExchange exchange = buildExchange("/reviews", "status=OPEN");
         handler.handle(exchange);
         verify(repo).query(isNull(), eq(List.of("OPEN")));
     }
 
     @Test
-    void multipleStatusValuesParsedFromComma() throws Exception {
+    void handle_commaDelimitedStatus_parsesMultipleValues() throws Exception {
         HttpExchange exchange = buildExchange("/reviews", "status=OPEN,APPROVED");
         handler.handle(exchange);
         verify(repo).query(isNull(), eq(List.of("OPEN", "APPROVED")));
     }
 
     @Test
-    void emptyResultsHasEmptyItemsArray() throws Exception {
+    void handle_emptyResults_returnsEmptyItemsArray() throws Exception {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         HttpExchange exchange = buildExchangeWithBody("/reviews", null, body);
         handler.handle(exchange);
@@ -93,7 +93,7 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void responseContainsReviewId() throws Exception {
+    void handle_reviewFound_responseContainsReviewId() throws Exception {
         when(repo.query(any(), any())).thenReturn(List.of(
                 new ReviewRecord("rev-123", "OPEN", Instant.parse("2026-01-01T00:00:00Z"), null)));
         ByteArrayOutputStream body = new ByteArrayOutputStream();
@@ -104,7 +104,7 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void responseContainsStatus() throws Exception {
+    void handle_reviewFound_responseContainsStatus() throws Exception {
         when(repo.query(any(), any())).thenReturn(List.of(
                 new ReviewRecord("rev-1", "APPROVED", Instant.now(), null)));
         ByteArrayOutputStream body = new ByteArrayOutputStream();
@@ -115,7 +115,7 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void reviewBranchExtractedFromFirstRepoEntry() throws Exception {
+    void handle_reviewWithRepos_extractsReviewBranchFromFirstEntry() throws Exception {
         String reposJson = "[{\"owner\":\"alice\",\"repository\":\"repo\","
                 + "\"repositoryUrl\":\"https://example.com\","
                 + "\"branchName\":\"feature/x\",\"headCommit\":\"abc\"}]";
@@ -129,7 +129,7 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void baseBranchIsNull() throws Exception {
+    void handle_reviewWithNoRepos_baseBranchIsNull() throws Exception {
         when(repo.query(any(), any())).thenReturn(List.of(
                 new ReviewRecord("rev-1", "OPEN", Instant.now(), null)));
         ByteArrayOutputStream body = new ByteArrayOutputStream();
@@ -140,7 +140,7 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void repositoriesDeduplicatedByOwnerRepo() throws Exception {
+    void handle_duplicateRepoEntries_deduplicatedByOwnerRepo() throws Exception {
         String reposJson = "[{\"owner\":\"alice\",\"repository\":\"repo\","
                 + "\"repositoryUrl\":\"https://example.com\","
                 + "\"branchName\":\"feat-a\",\"headCommit\":\"aaa\"},"
@@ -160,7 +160,7 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void repositoriesContainsRepositoryUrl() throws Exception {
+    void handle_reviewWithRepo_responseContainsRepositoryUrl() throws Exception {
         String reposJson = "[{\"owner\":\"alice\",\"repository\":\"repo\","
                 + "\"repositoryUrl\":\"https://git.example.com/alice/repo\","
                 + "\"branchName\":\"main\",\"headCommit\":\"abc\"}]";
@@ -174,7 +174,7 @@ class ReviewsHandlerTest {
     }
 
     @Test
-    void nullRepositoriesJsonProducesEmptyRepositoriesList() throws Exception {
+    void handle_nullRepositoriesJson_returnsEmptyRepositoriesList() throws Exception {
         when(repo.query(any(), any())).thenReturn(List.of(
                 new ReviewRecord("rev-1", "OPEN", Instant.now(), null)));
         ByteArrayOutputStream body = new ByteArrayOutputStream();

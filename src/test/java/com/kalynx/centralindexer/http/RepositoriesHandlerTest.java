@@ -49,7 +49,7 @@ class RepositoriesHandlerTest {
     @Test
     void get_withRepositories_returnsItemsJson() throws Exception {
         when(repo.findAll()).thenReturn(List.of(
-                new RepositoryRecord("my-org", "my-repo", "https://git.example.com/my-repo.git", null)));
+                new RepositoryRecord("uuid-1", "my-org", "my-repo", "https://git.example.com/my-repo.git", null)));
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         HttpExchange exchange = buildExchange("GET", "/repositories", null, body);
 
@@ -91,7 +91,7 @@ class RepositoriesHandlerTest {
     @Test
     void post_existingRepository_updatesAndReturns200() throws Exception {
         when(repo.findAll()).thenReturn(List.of(
-                new RepositoryRecord("my-org", "my-repo", "https://old-url.git", null)));
+                new RepositoryRecord("uuid-1", "my-org", "my-repo", "https://old-url.git", null)));
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         String requestBody = """
             {"owner":"my-org","repository":"my-repo","url":"https://new-url.git"}

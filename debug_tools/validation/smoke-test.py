@@ -211,6 +211,14 @@ def main():
     else:
         fail(f"SSE endpoint unreachable or unexpected status (HTTP {status})")
 
+    # --- GET /reviews/smoke-probe/comments → 404 ---
+    print("\nGET /reviews/smoke-probe/comments (must return 404 — no comments indexed)")
+    status, _, body = get(base_url, "/reviews/smoke-probe/comments", token)
+    if status == 404:
+        pass_("GET /reviews/smoke-probe/comments → 404 (no comments indexed)")
+    else:
+        fail(f"GET /reviews/smoke-probe/comments → {status} (expected 404) — got: {body}")
+
     # --- POST /metrics → 405 ---
     print("\nPOST /metrics (must return 405)")
     status = post(base_url, "/metrics", token)

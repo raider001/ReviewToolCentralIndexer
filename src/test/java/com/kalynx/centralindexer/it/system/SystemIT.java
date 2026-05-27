@@ -10,6 +10,11 @@ import com.kalynx.centralindexer.it.support.RequiresDocker;
 import com.kalynx.centralindexer.json.GsonFactory;
 import com.kalynx.centralindexer.model.EventType;
 import com.kalynx.centralindexer.model.ReviewEvent;
+import com.kalynx.centralindexer.db.BranchRepository;
+import com.kalynx.centralindexer.db.CommentsIndexRepository;
+import com.kalynx.centralindexer.db.RepositoriesRepository;
+import com.kalynx.centralindexer.db.ReviewsIndexRepository;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.plugin.WebhookRouterImpl;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.spi.ProviderConfig;
@@ -69,7 +74,7 @@ class SystemIT {
     }
 
     @Test
-    void fullFlowWebhookToSse() throws Exception {
+    void handle_webhookPost_eventDeliveredOverSse() throws Exception {
         String repo = "owner/system-full-flow";
         app = buildAndStartApp(repo);
 
@@ -87,7 +92,7 @@ class SystemIT {
     }
 
     @Test
-    void healthCheckDrivesStartupReadiness() throws Exception {
+    void health_dbBecomesAvailable_transitionsToUp() throws Exception {
         AtomicBoolean dbAvailable = new AtomicBoolean(false);
         ConnectionPool mockPool = mock(ConnectionPool.class);
         Connection mockConn = mock(Connection.class);
@@ -163,7 +168,9 @@ class SystemIT {
         };
 
         Application application = new Application(config, pool, plugin,
-                new WebhookRouterImpl(), new PublisherRegistry(), new com.kalynx.centralindexer.metrics.MetricsCollector(pool));
+                new WebhookRouterImpl(), new PublisherRegistry(), new MetricsCollector(pool),
+                new RepositoriesRepository(pool), new BranchRepository(pool),
+                new ReviewsIndexRepository(pool), new CommentsIndexRepository(pool));
         application.start();
         return application;
     }

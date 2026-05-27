@@ -27,15 +27,11 @@ import java.util.List;
  *   },
  *   "branches": {
  *     "typeahead_p95_ms": 18
- *   },
- *   "backfill": {
- *     "progress_pct": -1.0
  *   }
  * }
  * }</pre>
  *
  * <p>Latency values of {@code -1} indicate insufficient samples (fewer than 20 recorded).
- * {@code backfill.progress_pct} of {@code -1} indicates no backfill is currently running.
  */
 public final class MetricsHandler implements HttpHandler {
 
@@ -77,7 +73,17 @@ public final class MetricsHandler implements HttpHandler {
                 + "\"sse\":{"
                 +   "\"connected_clients_total\":" + metrics.getConnectedClients() + ","
                 +   "\"writers_per_second\":"       + String.format("%.2f", metrics.getSseWritersPerSecond()) + ","
-                +   "\"write_latency_p95_ms\":"     + metrics.getSseWriteLatencyP95()
+                +   "\"write_latency_p95_ms\":"     + metrics.getSseWriteLatencyP95() + ","
+                +   "\"events_by_type_last_second\":" + buildStringLongMap(metrics.getSseEventCountsByType(1000))
+                + "},"
+                + "\"webhooks\":{"
+                +   "\"calls_by_type_last_second\":" + buildStringLongMap(metrics.getWebhookCountsByType(1000))
+                + "},"
+                + "\"rest\":{"
+                +   "\"calls_by_type_last_second\":" + buildStringLongMap(metrics.getRestCallCountsByType(1000))
+                + "},"
+                + "\"connections\":{"
+                +   "\"by_client\":" + buildStringIntMap(metrics.getConnectedClientIps())
                 + "},"
                 + "\"db\":{"
                 +   "\"get_reviews_p95_ms\":"       + metrics.getReviewsQueryP95() + ","
@@ -87,17 +93,40 @@ public final class MetricsHandler implements HttpHandler {
                 + "\"branches\":{"
                 +   "\"typeahead_p95_ms\":"         + metrics.getBranchesQueryP95()
                 + "},"
-                + "\"backfill\":{"
-                +   "\"progress_pct\":"             + metrics.getBackfillProgress()
-                + "},"
                 + "\"system\":{"
                 +   "\"cpu_percent\":"              + String.format("%.2f", metrics.getCpuSamples().average(1000)) + ","
                 +   "\"memory_mb\":"                + String.format("%.2f", metrics.getMemorySamples().average(1000)) + ","
                 +   "\"memory_max_mb\":"            + String.format("%.0f", MetricsCollector.memoryMaxMb()) + ","
                 +   "\"active_connections\":"       + String.format("%.0f", metrics.getConnectionSamples().average(1000)) + ","
                 +   "\"api_calls_last_second\":"    + metrics.getApiCallSamples().count(1000) + ","
-                +   "\"per_core_cpu_percent\":"     + coreArr
+                +   "\"per_core_cpu_percent\":"     + coreArr + ","
+                +   "\"disk_free_mb\":"             + metrics.getDiskFreeMb() + ","
+                +   "\"disk_total_mb\":"            + metrics.getDiskTotalMb()
                 + "}"
                 + "}";
+    }
+
+    private static String buildStringLongMap(java.util.Map<String, Long> map) {
+        if (map.isEmpty()) return "{}";
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (var entry : map.entrySet()) {
+            if (!first) sb.append(',');
+            sb.append('"').append(entry.getKey().replace("\"", "\\\"")).append("\":").append(entry.getValue());
+            first = false;
+        }
+        return sb.append('}').toString();
+    }
+
+    private static String buildStringIntMap(java.util.Map<String, Integer> map) {
+        if (map.isEmpty()) return "{}";
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (var entry : map.entrySet()) {
+            if (!first) sb.append(',');
+            sb.append('"').append(entry.getKey().replace("\"", "\\\"")).append("\":").append(entry.getValue());
+            first = false;
+        }
+        return sb.append('}').toString();
     }
 }

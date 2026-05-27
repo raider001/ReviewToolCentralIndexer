@@ -40,19 +40,29 @@ import java.util.Map;
  */
 public final class BitbucketReconciler {
 
-    private static final Logger log = LoggerFactory.getLogger(BitbucketReconciler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(BitbucketReconciler.class);
 
     private final HttpClient http;
+    private final MetricsCollector metrics;
 
     /**
      * Creates a reconciler using the JDK default HTTP client.
+     *
+     * @param metrics the metrics collector for API call tracking; may be {@code null}
      */
-    public BitbucketReconciler() {
+    public BitbucketReconciler(MetricsCollector metrics) {
         this.http = HttpClient.newHttpClient();
+        this.metrics = metrics;
     }
 
-    BitbucketReconciler(HttpClient http) {
+    /** No-arg constructor for tests and external SPI loading. */
+    public BitbucketReconciler() {
+        this((MetricsCollector) null);
+    }
+
+    BitbucketReconciler(HttpClient http, MetricsCollector metrics) {
         this.http = http;
+        this.metrics = metrics;
     }
 
     /**
@@ -94,7 +104,7 @@ public final class BitbucketReconciler {
             try {
                 sink.submit(event);
             } catch (RuntimeException e) {
-                log.warn("Failed to submit reconciled Bitbucket event for {}: {}",
+                LOGGER.warn("Failed to submit reconciled Bitbucket event for {}: {}",
                         repository, e.getMessage());
             }
         }
@@ -106,7 +116,7 @@ public final class BitbucketReconciler {
             String projectKey = config.properties().get("projectKey");
             String slug = repository.contains("/") ? repository.split("/")[1] : repository;
             if (baseUrl == null || projectKey == null) {
-                log.warn("Missing baseUrl or projectKey for Bitbucket DC reconciliation of {}",
+                LOGGER.warn("Missing baseUrl or projectKey for Bitbucket DC reconciliation of {}",
                         repository);
                 return null;
             }
@@ -115,7 +125,7 @@ public final class BitbucketReconciler {
         }
         String[] parts = repository.split("/", 2);
         if (parts.length < 2) {
-            log.warn("Cannot parse workspace from repository '{}' for Bitbucket Cloud", repository);
+            LOGGER.warn("Cannot parse workspace from repository '{}' for Bitbucket Cloud", repository);
             return null;
         }
         return "https://api.bitbucket.org/2.0/repositories/" + parts[0] + "/" + parts[1]
@@ -144,10 +154,9 @@ public final class BitbucketReconciler {
             }
             HttpResponse<String> response = http.send(builder.build(),
                     HttpResponse.BodyHandlers.ofString());
-            MetricsCollector mc = MetricsCollector.getInstance();
-            if (mc != null) mc.recordProviderApiCall();
+            if (metrics != null) metrics.recordProviderApiCall();
             if (response.statusCode() != 200) {
-                log.warn("Bitbucket API returned {} for {}", response.statusCode(), url);
+                LOGGER.warn("Bitbucket API returned {} for {}", response.statusCode(), url);
                 return null;
             }
             return response.body();
@@ -155,7 +164,7 @@ public final class BitbucketReconciler {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.warn("Error fetching Bitbucket branches from {}: {}", url, e.getMessage());
+            LOGGER.warn("Error fetching Bitbucket branches from {}: {}", url, e.getMessage());
             return null;
         }
     }

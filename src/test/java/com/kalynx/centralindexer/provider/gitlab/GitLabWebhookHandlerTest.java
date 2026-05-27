@@ -36,7 +36,7 @@ class GitLabWebhookHandlerTest {
     }
 
     @Test
-    void notesRefEmitsReviewCreated() {
+    void handle_notesRef_emitsReviewCreated() {
         byte[] body = buildPushBody(REPO, "refs/notes/reviews/rev-gl-001/metadata/title",
                 "abc123", "alice", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders("Push Hook", "uuid-gl-1"), body);
@@ -48,7 +48,7 @@ class GitLabWebhookHandlerTest {
     }
 
     @Test
-    void branchUpdatedEmitsBranchUpdated() {
+    void handle_branchRef_emitsBranchUpdated() {
         byte[] body = buildPushBody(REPO, "refs/heads/develop",
                 "deadbeef", "bob", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders("Push Hook", "uuid-gl-2"), body);
@@ -62,7 +62,7 @@ class GitLabWebhookHandlerTest {
     }
 
     @Test
-    void branchDeletedEmitsBranchDeleted() {
+    void handle_branchDeleted_emitsBranchDeleted() {
         byte[] body = buildPushBody(REPO, "refs/heads/old-feature",
                 "0000000000000000000000000000000000000000", "bob", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders("Push Hook", "uuid-gl-3"), body);
@@ -72,7 +72,7 @@ class GitLabWebhookHandlerTest {
     }
 
     @Test
-    void wrongTokenDiscards() {
+    void handle_wrongToken_discardsEvent() {
         byte[] body = buildPushBody(REPO, "refs/notes/reviews/rev-x/metadata/title",
                 "abc", "alice", "2026-05-19T10:00:00Z");
         Map<String, String> headers = Map.of(
@@ -84,14 +84,14 @@ class GitLabWebhookHandlerTest {
     }
 
     @Test
-    void nonPushEventDiscards() {
+    void handle_nonPushEvent_discardsEvent() {
         byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
         handler.handle(Map.of("x-gitlab-event", "Merge Request Hook"), body);
         assertTrue(submitted.isEmpty());
     }
 
     @Test
-    void unrecognisedRefDiscards() {
+    void handle_unrecognisedRef_discardsEvent() {
         byte[] body = buildPushBody(REPO, "refs/tags/v2.0",
                 "abc123", "alice", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders("Push Hook", "uuid-tag"), body);

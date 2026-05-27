@@ -30,35 +30,35 @@ class PluginLoaderTest {
         System.clearProperty(PluginLoader.SYSTEM_PROPERTY_PLUGINS_DIR);
     }
     @Test
-    void throwsWhenNoPlugin() {
+    void load_noPlugin_throwsPluginLoadException() {
         URLClassLoader loader = mock(URLClassLoader.class);
-        PluginLoader pluginLoader = new PluginLoader(config("test"), dir -> loader, l -> List.of());
+        PluginLoader pluginLoader = new PluginLoader(config("test"), null, dir -> loader, l -> List.of());
         assertThrows(PluginLoadException.class, pluginLoader::load);
     }
     @Test
-    void throwsWhenMultiplePlugins() {
+    void load_multiplePlugins_throwsPluginLoadException() {
         ProviderPlugin p1 = pluginWithId("github");
         ProviderPlugin p2 = pluginWithId("github");
         URLClassLoader loader = mock(URLClassLoader.class);
-        PluginLoader pluginLoader = new PluginLoader(config("github"), dir -> loader, l -> List.of(p1, p2));
+        PluginLoader pluginLoader = new PluginLoader(config("github"), null, dir -> loader, l -> List.of(p1, p2));
         PluginLoadException ex = assertThrows(PluginLoadException.class, pluginLoader::load);
         assertTrue(ex.getMessage().contains(p1.getClass().getName()),
                 "Exception should list conflicting class names");
     }
     @Test
-    void throwsOnProviderIdMismatch() {
+    void load_providerIdMismatch_throwsPluginLoadException() {
         ProviderPlugin plugin = pluginWithId("bitbucket");
         URLClassLoader loader = mock(URLClassLoader.class);
-        PluginLoader pluginLoader = new PluginLoader(config("github"), dir -> loader, l -> List.of(plugin));
+        PluginLoader pluginLoader = new PluginLoader(config("github"), null, dir -> loader, l -> List.of(plugin));
         PluginLoadException ex = assertThrows(PluginLoadException.class, pluginLoader::load);
         assertTrue(ex.getMessage().contains("github"),  "Exception should show expected ID");
         assertTrue(ex.getMessage().contains("bitbucket"), "Exception should show actual ID");
     }
     @Test
-    void pluginsDirSystemPropertyOverridesConfig() throws Exception {
+    void load_systemPropertyPluginsDir_overridesConfig() throws Exception {
         System.setProperty(PluginLoader.SYSTEM_PROPERTY_PLUGINS_DIR, "/custom/plugins");
         AtomicReference<Path> capturedDir = new AtomicReference<>();
-        PluginLoader pluginLoader = new PluginLoader(config("test"), dir -> {
+        PluginLoader pluginLoader = new PluginLoader(config("test"), null, dir -> {
             capturedDir.set(dir);
             return mock(URLClassLoader.class);
         }, l -> List.of(pluginWithId("test")));
@@ -67,22 +67,22 @@ class PluginLoaderTest {
                 "System property should override config plugins dir");
     }
     @Test
-    void startCallsPluginStartExactlyOnce() throws Exception {
+    void start_validPlugin_callsPluginStartOnce() throws Exception {
         ProviderPlugin plugin = mock(ProviderPlugin.class);
         when(plugin.providerId()).thenReturn("test");
         URLClassLoader loader = mock(URLClassLoader.class);
-        PluginLoader pluginLoader = new PluginLoader(config("test"), dir -> loader, l -> List.of(plugin));
+        PluginLoader pluginLoader = new PluginLoader(config("test"), null, dir -> loader, l -> List.of(plugin));
         pluginLoader.load();
         pluginLoader.start(List.of(), mock(EventSink.class), mock(WebhookRouter.class));
         verify(plugin, times(1)).start(any(), any(), any());
     }
     @Test
-    void closeAlwaysClosesClassLoaderEvenWhenStopThrows() throws Exception {
+    void close_pluginStopThrows_classLoaderAlwaysClosed() throws Exception {
         ProviderPlugin plugin = mock(ProviderPlugin.class);
         when(plugin.providerId()).thenReturn("test");
         doThrow(new RuntimeException("stop failed")).when(plugin).stop();
         URLClassLoader loader = mock(URLClassLoader.class);
-        PluginLoader pluginLoader = new PluginLoader(config("test"), dir -> loader, l -> List.of(plugin));
+        PluginLoader pluginLoader = new PluginLoader(config("test"), null, dir -> loader, l -> List.of(plugin));
         pluginLoader.load();
         assertThrows(RuntimeException.class, pluginLoader::close);
         verify(loader).close();

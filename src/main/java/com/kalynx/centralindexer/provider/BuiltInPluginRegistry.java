@@ -1,12 +1,13 @@
 package com.kalynx.centralindexer.provider;
 
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.provider.bitbucket.BitbucketPlugin;
 import com.kalynx.centralindexer.provider.github.GitHubPlugin;
 import com.kalynx.centralindexer.provider.gitlab.GitLabPlugin;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
 
 import java.util.Map;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 /**
  * Registry of provider plugins compiled directly into the indexer.
@@ -27,10 +28,10 @@ import java.util.function.Supplier;
  */
 public final class BuiltInPluginRegistry {
 
-    private static final Map<String, Supplier<ProviderPlugin>> REGISTRY = Map.of(
-            "github", GitHubPlugin::new,
-            "bitbucket", BitbucketPlugin::new,
-            "gitlab", GitLabPlugin::new
+    private static final Map<String, Function<MetricsCollector, ProviderPlugin>> REGISTRY = Map.of(
+            "github",    m -> new GitHubPlugin(m),
+            "bitbucket", m -> new BitbucketPlugin(m),
+            "gitlab",    m -> new GitLabPlugin(m)
     );
 
     private BuiltInPluginRegistry() {
@@ -41,14 +42,20 @@ public final class BuiltInPluginRegistry {
      * or {@code null} if no built-in matches.
      *
      * @param providerId the provider identifier from {@code config.plugin.providerId}
+     * @param metrics    the metrics collector to inject; may be {@code null}
      * @return a fresh {@link ProviderPlugin} instance, or {@code null}
      */
-    public static ProviderPlugin create(String providerId) {
+    public static ProviderPlugin create(String providerId, MetricsCollector metrics) {
         if (providerId == null) {
             return null;
         }
-        Supplier<ProviderPlugin> factory = REGISTRY.get(providerId);
-        return factory != null ? factory.get() : null;
+        Function<MetricsCollector, ProviderPlugin> factory = REGISTRY.get(providerId);
+        return factory != null ? factory.apply(metrics) : null;
+    }
+
+    /** Convenience overload with no metrics injection. */
+    public static ProviderPlugin create(String providerId) {
+        return create(providerId, null);
     }
 
     /**

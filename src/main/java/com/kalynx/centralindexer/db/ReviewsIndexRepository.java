@@ -11,6 +11,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Simple repository for the denormalised reviews_index read model.
@@ -18,18 +19,20 @@ import java.util.List;
 public final class ReviewsIndexRepository {
 
     private static final String SQL_UPSERT =
-            "INSERT INTO reviews_index (review_id, status, last_updated, repositories) " +
-            "VALUES (?, ?, ?, ?::jsonb) " +
-            "ON CONFLICT (review_id) DO UPDATE SET " +
-            "  status       = COALESCE(EXCLUDED.status, reviews_index.status), " +
-            "  last_updated = GREATEST(reviews_index.last_updated, EXCLUDED.last_updated), " +
-            "  repositories = (" +
+            "INSERT INTO " + DbSchema.TABLE_REVIEWS_INDEX +
+            " (" + DbSchema.COL_REVIEW_ID + ", " + DbSchema.COL_STATUS + ", " +
+            DbSchema.COL_LAST_UPDATED + ", " + DbSchema.COL_REPOSITORIES + ")" +
+            " VALUES (?, ?, ?, ?::jsonb)" +
+            " ON CONFLICT (" + DbSchema.COL_REVIEW_ID + ") DO UPDATE SET" +
+            "  " + DbSchema.COL_STATUS + "       = COALESCE(EXCLUDED." + DbSchema.COL_STATUS + ", " + DbSchema.TABLE_REVIEWS_INDEX + "." + DbSchema.COL_STATUS + ")," +
+            "  " + DbSchema.COL_LAST_UPDATED + " = GREATEST(" + DbSchema.TABLE_REVIEWS_INDEX + "." + DbSchema.COL_LAST_UPDATED + ", EXCLUDED." + DbSchema.COL_LAST_UPDATED + ")," +
+            "  " + DbSchema.COL_REPOSITORIES + " = (" +
             "    SELECT jsonb_agg(obj) FROM (" +
             "      SELECT DISTINCT ON (obj->>'owner', obj->>'repository') obj" +
             "      FROM (" +
-            "        SELECT jsonb_array_elements(COALESCE(EXCLUDED.repositories,'[]'::jsonb)) obj" +
+            "        SELECT jsonb_array_elements(COALESCE(EXCLUDED." + DbSchema.COL_REPOSITORIES + ",'[]'::jsonb)) obj" +
             "        UNION ALL" +
-            "        SELECT jsonb_array_elements(COALESCE(reviews_index.repositories,'[]'::jsonb)) obj" +
+            "        SELECT jsonb_array_elements(COALESCE(" + DbSchema.TABLE_REVIEWS_INDEX + "." + DbSchema.COL_REPOSITORIES + ",'[]'::jsonb)) obj" +
             "      ) combined" +
             "      ORDER BY obj->>'owner', obj->>'repository'," +
             "               (obj->>'branchName' IS NULL)" +
@@ -37,7 +40,20 @@ public final class ReviewsIndexRepository {
             "  )";
 
     private static final String SQL_QUERY_ALL =
-            "SELECT review_id, status, last_updated, repositories FROM reviews_index ORDER BY last_updated DESC";
+            "SELECT " + DbSchema.COL_REVIEW_ID + ", " + DbSchema.COL_STATUS + ", " +
+            DbSchema.COL_LAST_UPDATED + ", " + DbSchema.COL_REPOSITORIES +
+            " FROM " + DbSchema.TABLE_REVIEWS_INDEX +
+            " ORDER BY " + DbSchema.COL_LAST_UPDATED + " DESC";
+
+    private static final String SQL_FIND_STATUS_BY_ID =
+            "SELECT " + DbSchema.COL_STATUS +
+            " FROM " + DbSchema.TABLE_REVIEWS_INDEX +
+            " WHERE " + DbSchema.COL_REVIEW_ID + " = ?";
+
+    private static final String SQL_QUERY_FILTERED_BASE =
+            "SELECT " + DbSchema.COL_REVIEW_ID + ", " + DbSchema.COL_STATUS + ", " +
+            DbSchema.COL_LAST_UPDATED + ", " + DbSchema.COL_REPOSITORIES +
+            " FROM " + DbSchema.TABLE_REVIEWS_INDEX;
 
     private final ConnectionPool pool;
     private final Gson gson;
@@ -75,25 +91,44 @@ public final class ReviewsIndexRepository {
         }
     }
 
+    /**
+     * Returns the status of a single review, or empty if the review is not known.
+     *
+     * @param reviewId the review to look up
+     * @return the status string (e.g. {@code "OPEN"}, {@code "CLOSED"}) or empty
+     * @throws SQLException         if the query fails
+     * @throws InterruptedException if the thread is interrupted waiting for a connection
+     */
+    public Optional<String> findStatusById(String reviewId) throws SQLException, InterruptedException {
+        Connection conn = pool.acquire();
+        try (PreparedStatement ps = conn.prepareStatement(SQL_FIND_STATUS_BY_ID)) {
+            ps.setString(1, reviewId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.ofNullable(rs.getString("status")) : Optional.empty();
+            }
+        } finally {
+            pool.release(conn);
+        }
+    }
+
     public List<ReviewRecord> query(Instant since, List<String> statuses)
             throws SQLException, InterruptedException {
         boolean hasSince = since != null;
         boolean hasStatuses = statuses != null && !statuses.isEmpty();
-        StringBuilder sql = new StringBuilder(
-                "SELECT review_id, status, last_updated, repositories FROM reviews_index");
+        StringBuilder sql = new StringBuilder(SQL_QUERY_FILTERED_BASE);
         if (hasSince || hasStatuses) {
             sql.append(" WHERE ");
             if (hasSince) {
-                sql.append("last_updated > ?");
+                sql.append(DbSchema.COL_LAST_UPDATED).append(" > ?");
             }
             if (hasSince && hasStatuses) {
                 sql.append(" AND ");
             }
             if (hasStatuses) {
-                sql.append("status = ANY(?)");
+                sql.append(DbSchema.COL_STATUS).append(" = ANY(?)");
             }
         }
-        sql.append(" ORDER BY last_updated DESC");
+        sql.append(" ORDER BY ").append(DbSchema.COL_LAST_UPDATED).append(" DESC");
         Connection conn = pool.acquire();
         try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             int idx = 1;

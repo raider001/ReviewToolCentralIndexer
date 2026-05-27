@@ -49,7 +49,7 @@ class HttpServerIT {
         }
     }
     @Test
-    void healthEndpointReturns200() throws Exception {
+    void healthEndpoint_authDisabled_returns200() throws Exception {
         startServer(false, null);
         HttpURLConnection conn = openConnection("GET", "/health", null, null);
         assertEquals(200, conn.getResponseCode());
@@ -59,7 +59,7 @@ class HttpServerIT {
         assertEquals("application/json", conn.getHeaderField("Content-Type"));
     }
     @Test
-    void webhookDispatchedToPlugin() throws Exception {
+    void webhookPost_registeredHandler_dispatchedToPlugin() throws Exception {
         AtomicBoolean handlerInvoked = new AtomicBoolean(false);
         router.registerPost("push", (headers, body) -> handlerInvoked.set(true));
         startServer(false, null);
@@ -69,19 +69,19 @@ class HttpServerIT {
         assertTrue(handlerInvoked.get(), "Registered handler must be invoked");
     }
     @Test
-    void authRejects401WithNoToken() throws Exception {
+    void authFilter_noToken_returns401() throws Exception {
         startServer(true, "test-token");
         HttpURLConnection conn = openConnection("GET", "/events/stream?repository=test", null, null);
         assertEquals(401, conn.getResponseCode());
     }
     @Test
-    void authRejects403WithWrongToken() throws Exception {
+    void authFilter_wrongToken_returns403() throws Exception {
         startServer(true, "test-token");
         HttpURLConnection conn = openConnection("GET", "/events/stream?repository=test", "Bearer wrong-token", null);
         assertEquals(403, conn.getResponseCode());
     }
     @Test
-    void authAcceptsCorrectToken() throws Exception {
+    void authFilter_correctToken_allowsRequest() throws Exception {
         startServer(true, "test-token");
         HttpURLConnection conn = openConnection("GET", "/events/stream?repository=test", "Bearer test-token", null);
         int status = conn.getResponseCode();
@@ -89,7 +89,7 @@ class HttpServerIT {
                 "Correct token must not yield 401 or 403, got " + status);
     }
     @Test
-    void authDisabledAllowsEventsWithoutToken() throws Exception {
+    void authFilter_authDisabled_allowsWithoutToken() throws Exception {
         startServer(false, null);
         HttpURLConnection conn = openConnection("GET", "/events/stream?repository=test", null, null);
         int status = conn.getResponseCode();

@@ -2,6 +2,7 @@ package com.kalynx.centralindexer.plugin;
 
 import com.kalynx.centralindexer.config.AppConfig;
 import com.kalynx.centralindexer.exception.PluginLoadException;
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.provider.BuiltInPluginRegistry;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.spi.ProviderConfig;
@@ -69,6 +70,7 @@ public final class PluginLoader implements AutoCloseable {
     }
 
     private final AppConfig config;
+    private final MetricsCollector metrics;
     private final ClassLoaderFactory classLoaderFactory;
     private final ServiceDiscovery serviceDiscovery;
 
@@ -78,14 +80,22 @@ public final class PluginLoader implements AutoCloseable {
     /**
      * Constructs a {@code PluginLoader} using the production classloader and service discovery.
      *
-     * @param config the loaded application configuration
+     * @param config  the loaded application configuration
+     * @param metrics the metrics collector to inject into built-in plugins; may be {@code null}
      */
-    public PluginLoader(AppConfig config) {
-        this(config, PluginLoader::buildProductionClassLoader, PluginLoader::discoverViaServiceLoader);
+    public PluginLoader(AppConfig config, MetricsCollector metrics) {
+        this(config, metrics, PluginLoader::buildProductionClassLoader, PluginLoader::discoverViaServiceLoader);
     }
 
-    PluginLoader(AppConfig config, ClassLoaderFactory classLoaderFactory, ServiceDiscovery serviceDiscovery) {
+    /** Constructs a {@code PluginLoader} without metrics injection (built-in plugins will not record API calls). */
+    public PluginLoader(AppConfig config) {
+        this(config, null);
+    }
+
+    PluginLoader(AppConfig config, MetricsCollector metrics,
+                 ClassLoaderFactory classLoaderFactory, ServiceDiscovery serviceDiscovery) {
         this.config = config;
+        this.metrics = metrics;
         this.classLoaderFactory = classLoaderFactory;
         this.serviceDiscovery = serviceDiscovery;
     }
@@ -109,14 +119,14 @@ public final class PluginLoader implements AutoCloseable {
             return loadBuiltIn(dir);
         }
         validateSinglePlugin(candidates, dir);
-        validateProviderId(candidates.get(0));
-        plugin = candidates.get(0);
+        validateProviderId(candidates.getFirst());
+        plugin = candidates.getFirst();
         return plugin;
     }
 
     private ProviderPlugin loadBuiltIn(Path dir) {
         String providerId = config.getPlugin() != null ? config.getPlugin().getProviderId() : null;
-        ProviderPlugin builtIn = BuiltInPluginRegistry.create(providerId);
+        ProviderPlugin builtIn = BuiltInPluginRegistry.create(providerId, metrics);
         if (builtIn == null) {
             throw new PluginLoadException(
                     "No ProviderPlugin found in '" + dir + "' and no built-in registered for"

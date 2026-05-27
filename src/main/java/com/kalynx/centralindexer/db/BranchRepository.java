@@ -9,12 +9,43 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Queries the {@code branches} table for the {@code GET /branches} endpoint.
+ * Queries and mutates the {@code branches} table for the {@code GET /branches} endpoint
+ * and branch lifecycle events.
  *
- * <p>All queries order results by {@code (owner, repository, branch_name)} to match
- * the primary key order, which enables keyset pagination via the {@code cursor} parameter.
+ * <p>After M0, {@code branches} uses {@code (repository_id, branch_name)} as its primary
+ * key. Write operations accept a {@code repository_id} UUID string (the surrogate key
+ * returned by {@link RepositoriesRepository#upsert}).
+ *
+ * <p>The {@code query} method JOINs {@code repositories} to resolve {@code owner} and
+ * {@code repository} for API responses and cursor encoding. Keyset pagination uses
+ * {@code (owner, repository, branch_name)} for stable, human-readable ordering.
  */
 public final class BranchRepository {
+
+    private static final String SQL_QUERY_BASE =
+            "SELECT b." + DbSchema.COL_REPOSITORY_ID + ", r." + DbSchema.COL_OWNER + ", r." +
+            DbSchema.COL_REPOSITORY + ", b." + DbSchema.COL_BRANCH_NAME +
+            " FROM " + DbSchema.TABLE_BRANCHES + " b" +
+            " JOIN " + DbSchema.TABLE_REPOSITORIES + " r ON b." + DbSchema.COL_REPOSITORY_ID +
+            " = r." + DbSchema.COL_REPOSITORY_ID;
+
+    private static final String SQL_UPSERT =
+            "INSERT INTO " + DbSchema.TABLE_BRANCHES +
+            " (" + DbSchema.COL_REPOSITORY_ID + ", " + DbSchema.COL_BRANCH_NAME + ", " +
+            DbSchema.COL_HEAD_COMMIT + ") VALUES (?::uuid, ?, ?)" +
+            " ON CONFLICT (" + DbSchema.COL_REPOSITORY_ID + ", " + DbSchema.COL_BRANCH_NAME + ")" +
+            " DO UPDATE SET " + DbSchema.COL_HEAD_COMMIT + " = EXCLUDED." + DbSchema.COL_HEAD_COMMIT;
+
+    private static final String SQL_DELETE =
+            "DELETE FROM " + DbSchema.TABLE_BRANCHES +
+            " WHERE " + DbSchema.COL_REPOSITORY_ID + " = ?::uuid AND " +
+            DbSchema.COL_BRANCH_NAME + " = ?";
+
+    private static final String SQL_FIND_HEAD_COMMIT =
+            "SELECT " + DbSchema.COL_HEAD_COMMIT +
+            " FROM " + DbSchema.TABLE_BRANCHES +
+            " WHERE " + DbSchema.COL_REPOSITORY_ID + " = ?::uuid AND " +
+            DbSchema.COL_BRANCH_NAME + " = ?";
 
     private final ConnectionPool pool;
 
@@ -30,9 +61,9 @@ public final class BranchRepository {
     /**
      * Queries branches with optional prefix, repository, and cursor filters.
      *
-     * <p>Conditions are combined with AND. Cursor uses a composite keyset comparison
-     * ({@code (owner, repository, branch_name) > (?, ?, ?)}) which aligns with the
-     * primary key index and is safe to combine with other WHERE conditions.
+     * <p>Results are ordered by {@code (repository_id, branch_name)}. The cursor encodes
+     * the last row's {@code repositoryId} and {@code branchName} as a two-part key for
+     * keyset pagination.
      *
      * @param prefix     optional branch name prefix; null or empty means no filter
      * @param owner      optional repository owner; null means no filter (paired with repository)
@@ -46,23 +77,22 @@ public final class BranchRepository {
      */
     public List<BranchRecord> query(String prefix, String owner, String repository,
                                     int limit, String[] cursor) throws SQLException, InterruptedException {
-        StringBuilder sql = new StringBuilder(
-                "SELECT owner, repository, branch_name FROM branches");
+        StringBuilder sql = new StringBuilder(SQL_QUERY_BASE);
         List<Object> params = new ArrayList<>();
         List<String> conditions = new ArrayList<>();
 
         if (prefix != null && !prefix.isEmpty()) {
-            conditions.add("branch_name LIKE ?");
+            conditions.add("b.branch_name LIKE ?");
             params.add(escapeLike(prefix) + "%");
         }
         if (owner != null) {
-            conditions.add("owner = ?");
+            conditions.add("r.owner = ?");
             params.add(owner);
-            conditions.add("repository = ?");
+            conditions.add("r.repository = ?");
             params.add(repository);
         }
         if (cursor != null) {
-            conditions.add("(owner, repository, branch_name) > (?, ?, ?)");
+            conditions.add("(r.owner, r.repository, b.branch_name) > (?, ?, ?)");
             params.add(cursor[0]);
             params.add(cursor[1]);
             params.add(cursor[2]);
@@ -71,7 +101,7 @@ public final class BranchRepository {
         if (!conditions.isEmpty()) {
             sql.append(" WHERE ").append(String.join(" AND ", conditions));
         }
-        sql.append(" ORDER BY owner, repository, branch_name LIMIT ?");
+        sql.append(" ORDER BY r.owner, r.repository, b.branch_name LIMIT ?");
         params.add(limit);
 
         Connection conn = pool.acquire();
@@ -83,6 +113,7 @@ public final class BranchRepository {
                 List<BranchRecord> results = new ArrayList<>();
                 while (rs.next()) {
                     results.add(new BranchRecord(
+                            rs.getString("repository_id"),
                             rs.getString("owner"),
                             rs.getString("repository"),
                             rs.getString("branch_name")));
@@ -97,23 +128,19 @@ public final class BranchRepository {
     /**
      * Inserts or updates a branch row. On conflict the {@code head_commit} is updated.
      *
-     * @param owner      the repository owner
-     * @param repository the repository name
-     * @param branchName the branch name
-     * @param headCommit the current HEAD commit SHA
+     * @param repositoryId the surrogate UUID of the owning repository
+     * @param branchName   the branch name
+     * @param headCommit   the current HEAD commit SHA
      * @throws SQLException         if the upsert fails
      * @throws InterruptedException if the thread is interrupted waiting for a connection
      */
-    public void upsert(String owner, String repository, String branchName, String headCommit)
+    public void upsert(String repositoryId, String branchName, String headCommit)
             throws SQLException, InterruptedException {
         Connection conn = pool.acquire();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO branches (owner, repository, branch_name, head_commit) VALUES (?, ?, ?, ?) " +
-                "ON CONFLICT (owner, repository, branch_name) DO UPDATE SET head_commit = EXCLUDED.head_commit")) {
-            ps.setString(1, owner);
-            ps.setString(2, repository);
-            ps.setString(3, branchName);
-            ps.setString(4, headCommit);
+        try (PreparedStatement ps = conn.prepareStatement(SQL_UPSERT)) {
+            ps.setString(1, repositoryId);
+            ps.setString(2, branchName);
+            ps.setString(3, headCommit);
             ps.executeUpdate();
         } finally {
             pool.release(conn);
@@ -123,20 +150,17 @@ public final class BranchRepository {
     /**
      * Deletes a branch row. No-op if the row does not exist.
      *
-     * @param owner      the repository owner
-     * @param repository the repository name
-     * @param branchName the branch name
+     * @param repositoryId the surrogate UUID of the owning repository
+     * @param branchName   the branch name
      * @throws SQLException         if the delete fails
      * @throws InterruptedException if the thread is interrupted waiting for a connection
      */
-    public void delete(String owner, String repository, String branchName)
+    public void delete(String repositoryId, String branchName)
             throws SQLException, InterruptedException {
         Connection conn = pool.acquire();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "DELETE FROM branches WHERE owner = ? AND repository = ? AND branch_name = ?")) {
-            ps.setString(1, owner);
-            ps.setString(2, repository);
-            ps.setString(3, branchName);
+        try (PreparedStatement ps = conn.prepareStatement(SQL_DELETE)) {
+            ps.setString(1, repositoryId);
+            ps.setString(2, branchName);
             ps.executeUpdate();
         } finally {
             pool.release(conn);
@@ -146,21 +170,18 @@ public final class BranchRepository {
     /**
      * Returns the HEAD commit SHA for a specific branch, or empty if the branch is not tracked.
      *
-     * @param owner      the repository owner
-     * @param repository the repository name
-     * @param branchName the branch name
+     * @param repositoryId the surrogate UUID of the owning repository
+     * @param branchName   the branch name
      * @return the HEAD commit SHA wrapped in Optional, or empty if not found
      * @throws SQLException         if the query fails
      * @throws InterruptedException if the thread is interrupted waiting for a connection
      */
-    public Optional<String> findHeadCommit(String owner, String repository, String branchName)
+    public Optional<String> findHeadCommit(String repositoryId, String branchName)
             throws SQLException, InterruptedException {
         Connection conn = pool.acquire();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT head_commit FROM branches WHERE owner = ? AND repository = ? AND branch_name = ?")) {
-            ps.setString(1, owner);
-            ps.setString(2, repository);
-            ps.setString(3, branchName);
+        try (PreparedStatement ps = conn.prepareStatement(SQL_FIND_HEAD_COMMIT)) {
+            ps.setString(1, repositoryId);
+            ps.setString(2, branchName);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? Optional.ofNullable(rs.getString("head_commit")) : Optional.empty();
             }

@@ -1,5 +1,6 @@
 package com.kalynx.centralindexer.provider.github;
 
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.spi.ProviderConfig;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
@@ -30,10 +31,17 @@ public final class GitHubPlugin implements ProviderPlugin {
 
     /**
      * Creates a {@code GitHubPlugin} with the default HTTP-based reconcilers.
+     *
+     * @param metrics the metrics collector for API call tracking; may be {@code null}
      */
+    public GitHubPlugin(MetricsCollector metrics) {
+        this.reconciler = new GitHubReconciler(metrics);
+        this.branchReconciler = new GitHubBranchReconciler(metrics);
+    }
+
+    /** No-arg constructor for external plugin JAR loading via {@link java.util.ServiceLoader}. */
     public GitHubPlugin() {
-        this.reconciler = new GitHubReconciler();
-        this.branchReconciler = new GitHubBranchReconciler();
+        this(null);
     }
 
     @Override

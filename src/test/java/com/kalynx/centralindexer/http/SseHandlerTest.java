@@ -30,7 +30,7 @@ import static org.mockito.Mockito.verify;
 class SseHandlerTest {
 
     @Test
-    void missingRepositoryParamReturns400() throws Exception {
+    void handle_missingRepositoryParam_returns400() throws Exception {
         SseHandler handler = new SseHandler(mock(PublisherRegistry.class));
         HttpExchange exchange = buildExchange("/events/stream", null);
         handler.handle(exchange);
@@ -38,7 +38,7 @@ class SseHandlerTest {
     }
 
     @Test
-    void sseResponseHeadersSet() throws Exception {
+    void handle_validRequest_sseResponseHeadersSet() throws Exception {
         Headers responseHeaders = new Headers();
         SseHandler handler = new SseHandler(immediatelyCompletingRegistry());
         HttpExchange exchange = buildExchangeWithResponseHeaders(
@@ -50,7 +50,7 @@ class SseHandlerTest {
     }
 
     @Test
-    void sseFrameFormatIsCorrect() throws Exception {
+    void handle_reviewEvent_sseFrameFormatIsCorrect() throws Exception {
         ReviewEvent event = new ReviewEvent(42L, Instant.parse("2026-05-19T10:00:00Z"),
                 "myrepo", EventType.REVIEW_CREATED, "rev-1", "alice", null, Map.of());
         PublisherRegistry registry = mock(PublisherRegistry.class);
@@ -73,7 +73,7 @@ class SseHandlerTest {
     }
 
     @Test
-    void wildcardRepositoryReturns200WithCorrectHeaders() throws Exception {
+    void handle_wildcardRepository_sseHeadersSet() throws Exception {
         Headers responseHeaders = new Headers();
         SseHandler handler = new SseHandler(immediatelyCompletingRegistryForWildcard());
         HttpExchange exchange = buildExchangeWithResponseHeaders(

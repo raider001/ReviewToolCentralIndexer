@@ -1,8 +1,10 @@
 package com.kalynx.centralindexer.http;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import com.kalynx.centralindexer.json.GsonFactory;
 import com.kalynx.centralindexer.metrics.MetricsCollector;
+import com.kalynx.centralindexer.model.EventType;
 import com.kalynx.centralindexer.model.ReviewEvent;
 import com.kalynx.centralindexer.sse.PublisherRegistry;
 import com.sun.net.httpserver.HttpExchange;
@@ -81,13 +83,13 @@ public final class SseHandler implements HttpHandler {
         exchange.sendResponseHeaders(200, 0);
 
         log.info("SSE client connected: address='{}' repo='{}'", clientAddress, repo);
-        if (metrics != null) metrics.incrementConnectedClients();
+        if (metrics != null) metrics.incrementConnectedClients(clientAddress);
         try (OutputStream out = exchange.getResponseBody()) {
             streamLiveEvents(out, repo);
         } catch (Exception e) {
             log.debug("SSE stream closed for client '{}' repo='{}': {}", clientAddress, repo, e.getMessage());
         } finally {
-            if (metrics != null) metrics.decrementConnectedClients();
+            if (metrics != null) metrics.decrementConnectedClients(clientAddress);
             log.info("SSE client disconnected: address='{}' repo='{}'", clientAddress, repo);
         }
     }
@@ -121,14 +123,39 @@ public final class SseHandler implements HttpHandler {
     }
 
     private void writeSseFrame(OutputStream out, ReviewEvent event) throws IOException {
-        String frame = "event: " + event.eventType().name() + "\n"
-                + "data: " + gson.toJson(event) + "\n\n";
+        String sseName = toSseName(event.eventType());
+        String data = toSseData(event);
+        String frame = "event: " + sseName + "\n" + "data: " + data + "\n\n";
         long start = System.nanoTime();
         out.write(frame.getBytes(StandardCharsets.UTF_8));
         if (metrics != null) {
             metrics.recordSseWriteLatency((System.nanoTime() - start) / 1_000_000);
-            metrics.recordSseEvent();
+            metrics.recordSseEvent(sseName);
         }
+    }
+
+    static String toSseName(EventType type) {
+        return switch (type) {
+            case REVIEW_COMMENT_ADDED   -> "comment.added";
+            case REVIEW_COMMENT_UPDATED -> "comment.updated";
+            default                     -> type.name();
+        };
+    }
+
+    String toSseData(ReviewEvent event) {
+        String sseName = toSseName(event.eventType());
+        if (event.eventType() == EventType.REVIEW_COMMENT_ADDED
+                || event.eventType() == EventType.REVIEW_COMMENT_UPDATED) {
+            JsonObject obj = new JsonObject();
+            obj.addProperty("type", sseName);
+            obj.addProperty("review_id", event.reviewId());
+            String repoUrl = event.payload().get("repository_url");
+            String commentId = event.payload().get("comment_id");
+            if (repoUrl != null) obj.addProperty("repository_url", repoUrl);
+            if (commentId != null) obj.addProperty("comment_id", commentId);
+            return gson.toJson(obj);
+        }
+        return gson.toJson(event);
     }
 
     private void sendError(HttpExchange exchange, int status, String json) throws IOException {

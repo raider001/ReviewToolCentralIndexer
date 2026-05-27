@@ -24,7 +24,7 @@ import java.util.List;
  *   <li>{@code ./repositories.json} relative to the working directory.</li>
  * </ol>
  *
- * <p>If the resolved file does not exist the loader returns an empty list and logs a
+ * <p>If the resolved file does not exist the loader returns an empty list and LOGGERs a
  * warning — repositories will be populated later when branch-push webhooks arrive.
  *
  * <h2>File format</h2>
@@ -41,7 +41,7 @@ import java.util.List;
  */
 public final class RepositoriesFileLoader {
 
-    private static final Logger log = LoggerFactory.getLogger(RepositoriesFileLoader.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(RepositoriesFileLoader.class);
 
     private RepositoriesFileLoader() {
     }
@@ -66,7 +66,7 @@ public final class RepositoriesFileLoader {
     public static List<RepositoryConfig> load(java.util.function.Function<String, String> envProvider) {
         Path path = resolvePath(envProvider);
         if (!Files.exists(path)) {
-            log.warn("repositories.json not found at '{}' — no repositories seeded at startup; " +
+            LOGGER.warn("repositories.json not found at '{}' — no repositories seeded at startup; " +
                      "repositories will be populated as branch-push webhooks arrive", path.toAbsolutePath());
             return Collections.emptyList();
         }
@@ -75,32 +75,32 @@ public final class RepositoriesFileLoader {
         try {
             json = Files.readString(path);
         } catch (IOException e) {
-            log.warn("Cannot read repositories file '{}': {}", path.toAbsolutePath(), e.getMessage());
+            LOGGER.warn("Cannot read repositories file '{}': {}", path.toAbsolutePath(), e.getMessage());
             return Collections.emptyList();
         }
 
         FileEntry[] entries = GsonFactory.getInstance().fromJson(json, FileEntry[].class);
         if (entries == null || entries.length == 0) {
-            log.debug("repositories.json is empty — no repositories seeded");
+            LOGGER.debug("repositories.json is empty — no repositories seeded");
             return Collections.emptyList();
         }
 
         List<RepositoryConfig> result = new ArrayList<>();
         for (FileEntry entry : entries) {
             if (entry.url == null || entry.url.isBlank()) {
-                log.warn("Skipping repositories.json entry with missing url: {}", entry.name);
+                LOGGER.warn("Skipping repositories.json entry with missing url: {}", entry.name);
                 continue;
             }
             RepositoryConfig config = toConfig(entry);
             if (config == null) {
-                log.warn("Skipping repositories.json entry with unparseable url: '{}'", entry.url);
+                LOGGER.warn("Skipping repositories.json entry with unparseable url: '{}'", entry.url);
                 continue;
             }
             result.add(config);
-            log.debug("Loaded repository from file: {}/{} url='{}'",
+            LOGGER.debug("Loaded repository from file: {}/{} url='{}'",
                     config.getOwner(), config.getRepository(), config.getUrl());
         }
-        log.info("Loaded {} repository/repositories from {}", result.size(), path.toAbsolutePath());
+        LOGGER.info("Loaded {} repository/repositories from {}", result.size(), path.toAbsolutePath());
         return Collections.unmodifiableList(result);
     }
 

@@ -144,11 +144,10 @@ public final class RepositoriesFileWatcher implements Runnable {
 
     private void onboardRepository(RepositoryConfig repo) {
         try {
-            repositoriesRepository.upsert(repo.getOwner(), repo.getRepository(), repo.getUrl());
+            RepositoryRecord record = repositoriesRepository.upsert(
+                    repo.getOwner(), repo.getRepository(), repo.getUrl());
             log.info("Repository '{}' registered in DB", repo.ownerSlashRepo());
 
-            RepositoryRecord record = new RepositoryRecord(
-                    repo.getOwner(), repo.getRepository(), repo.getUrl(), null);
             new StartupReconciler(repositoriesRepository, plugin)
                     .reconcileRepository(record);
 

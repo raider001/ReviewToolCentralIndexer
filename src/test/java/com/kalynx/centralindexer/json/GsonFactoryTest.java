@@ -17,7 +17,7 @@ class GsonFactoryTest {
     private final Gson gson = GsonFactory.getInstance();
 
     @Test
-    void instantRoundTrip() {
+    void getInstance_instantValue_roundTripsAsIso8601() {
         Instant original = Instant.parse("2026-05-19T10:00:00Z");
         String json = gson.toJson(original);
         Instant restored = gson.fromJson(json, Instant.class);
@@ -25,7 +25,7 @@ class GsonFactoryTest {
     }
 
     @Test
-    void mapStringStringRoundTrip() {
+    void getInstance_mapStringString_roundTripsToJson() {
         Map<String, String> original = Map.of("key1", "value1", "key2", "value2");
         String json = gson.toJson(original);
         @SuppressWarnings("unchecked")
@@ -35,14 +35,14 @@ class GsonFactoryTest {
     }
 
     @Test
-    void nullFieldsSerializedAsJsonNull() {
+    void getInstance_nullField_serializedAsJsonNull() {
         String json = gson.toJson(new NullFieldHolder(null));
         assertNotNull(json);
         assertEquals("{\"value\":null}", json);
     }
 
     @Test
-    void instantSerializedAsIso8601String() {
+    void getInstance_instantValue_serializedAsIso8601String() {
         Instant i = Instant.parse("2026-01-01T00:00:00Z");
         String json = gson.toJson(i);
         assertEquals("\"2026-01-01T00:00:00Z\"", json);

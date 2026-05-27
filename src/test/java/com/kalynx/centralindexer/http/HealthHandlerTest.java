@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
 class HealthHandlerTest {
 
     @Test
-    void upResponseWhenDbPingSucceeds() throws Exception {
+    void handle_dbPingSucceeds_returnsStatusUp() throws Exception {
         ConnectionPool pool = mockPool(false);
         HealthHandler handler = new HealthHandler(pool);
         HttpExchange exchange = prepareExchange();
@@ -38,7 +38,7 @@ class HealthHandlerTest {
     }
 
     @Test
-    void dbDownWhenPingThrowsSqlException() throws Exception {
+    void handle_dbPingThrows_returnsDbDown() throws Exception {
         ConnectionPool pool = mockPool(true);
         HealthHandler handler = new HealthHandler(pool);
         HttpExchange exchange = prepareExchange();

@@ -18,14 +18,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  */
 class PublisherRegistryTest {
     @Test
-    void publisherCreatedOnFirstSubscribe() {
+    void subscribe_firstSubscribe_createsPublisher() {
         PublisherRegistry registry = new PublisherRegistry();
         assertEquals(0, registry.publisherCount());
         registry.subscribe("owner/repo", noopSubscriber());
         assertEquals(1, registry.publisherCount());
     }
     @Test
-    void publisherRemovedOnLastUnsubscribe() throws Exception {
+    void subscribe_lastUnsubscribe_removesPublisher() throws Exception {
         PublisherRegistry registry = new PublisherRegistry();
         CountDownLatch subscribed = new CountDownLatch(1);
         AtomicReference<Flow.Subscription> subRef = new AtomicReference<>();
@@ -46,14 +46,14 @@ class PublisherRegistryTest {
         assertEquals(0, registry.publisherCount(), "Publisher must be removed after last subscriber cancels");
     }
     @Test
-    void publishToAbsentRepositoryIsNoOp() {
+    void publish_absentRepository_isNoOp() {
         PublisherRegistry registry = new PublisherRegistry();
         ReviewEvent event = testEvent("owner/absent");
         registry.publish(event);
         assertEquals(0, registry.publisherCount(), "No publisher must be created by publish()");
     }
     @Test
-    void multipleSubscribersReceiveSameEvent() throws Exception {
+    void publish_multipleSubscribers_allReceiveEvent() throws Exception {
         PublisherRegistry registry = new PublisherRegistry();
         BlockingQueue<ReviewEvent> queue1 = new LinkedBlockingQueue<>();
         BlockingQueue<ReviewEvent> queue2 = new LinkedBlockingQueue<>();
@@ -70,7 +70,7 @@ class PublisherRegistryTest {
         assertEquals(event.deliveryId(), received2.deliveryId());
     }
     @Test
-    void slowSubscriberDroppedPublisherContinues() throws Exception {
+    void publish_slowSubscriber_droppedAndFastContinues() throws Exception {
         PublisherRegistry registry = new PublisherRegistry();
         CountDownLatch slowDropped = new CountDownLatch(1);
         registry.subscribe("owner/slow", new Flow.Subscriber<>() {

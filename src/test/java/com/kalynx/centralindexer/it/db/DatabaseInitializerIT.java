@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 class DatabaseInitializerIT {
 
     @Test
-    void createsTablesOnFreshDatabase() throws Exception {
+    void init_freshDatabase_createsAllTables() throws Exception {
         try (PostgresTestContainer container = new PostgresTestContainer()) {
             ConnectionPool pool = buildPool(container);
             new DatabaseInitializer(pool).init();
@@ -31,16 +31,18 @@ class DatabaseInitializerIT {
             assertTableExists(conn, "repositories");
             assertTableExists(conn, "branches");
             assertTableExists(conn, "review_branches");
+            assertTableExists(conn, "comments_index");
             assertIndexExists(conn, "idx_reviews_index_last_updated");
             assertIndexExists(conn, "idx_reviews_index_repositories_gin");
             assertIndexExists(conn, "idx_branches_name_prefix");
+            assertIndexExists(conn, "idx_comments_index_review_id");
             pool.release(conn);
             pool.close();
         }
     }
 
     @Test
-    void idempotentOnExistingSchema() throws Exception {
+    void init_calledTwice_doesNotThrow() throws Exception {
         try (PostgresTestContainer container = new PostgresTestContainer()) {
             ConnectionPool pool = buildPool(container);
             DatabaseInitializer initializer = new DatabaseInitializer(pool);
@@ -51,13 +53,33 @@ class DatabaseInitializerIT {
     }
 
     @Test
-    void repositoriesTableHasKalynxReviewHeadColumn() throws Exception {
+    void init_freshDatabase_repositoriesTableHasKalynxReviewHeadColumn() throws Exception {
         try (PostgresTestContainer container = new PostgresTestContainer()) {
             ConnectionPool pool = buildPool(container);
             new DatabaseInitializer(pool).init();
 
             Connection conn = pool.acquire();
             assertColumnExists(conn, "repositories", "kalynx_review_head");
+            pool.release(conn);
+            pool.close();
+        }
+    }
+
+    @Test
+    void init_freshDatabase_commentsIndexTableHasCorrectSchema() throws Exception {
+        try (PostgresTestContainer container = new PostgresTestContainer()) {
+            ConnectionPool pool = buildPool(container);
+            new DatabaseInitializer(pool).init();
+
+            Connection conn = pool.acquire();
+            assertColumnType(conn, "comments_index", "comment_id", "uuid");
+            assertColumnType(conn, "comments_index", "review_id", "text");
+            assertColumnType(conn, "comments_index", "repository_id", "uuid");
+            assertColumnType(conn, "comments_index", "last_updated", "timestamp with time zone");
+            assertPrimaryKey(conn, "comments_index", "comment_id");
+            assertForeignKey(conn, "comments_index", "review_id");
+            assertForeignKey(conn, "comments_index", "repository_id");
+            assertIndexExists(conn, "idx_comments_index_review_id");
             pool.release(conn);
             pool.close();
         }
@@ -86,6 +108,41 @@ class DatabaseInitializerIT {
                 "' AND column_name = '" + columnName + "'");
         rs.next();
         assertEquals(1, rs.getInt(1), "Column '" + tableName + "." + columnName + "' should exist");
+    }
+
+    private void assertColumnType(Connection conn, String table, String column, String expectedType)
+            throws Exception {
+        ResultSet rs = conn.createStatement().executeQuery(
+                "SELECT data_type FROM information_schema.columns " +
+                "WHERE table_schema = 'public' AND table_name = '" + table +
+                "' AND column_name = '" + column + "'");
+        rs.next();
+        assertEquals(expectedType, rs.getString(1),
+                "Column '" + table + "." + column + "' should have type " + expectedType);
+    }
+
+    private void assertPrimaryKey(Connection conn, String table, String column) throws Exception {
+        ResultSet rs = conn.createStatement().executeQuery(
+                "SELECT COUNT(*) FROM information_schema.table_constraints tc " +
+                "JOIN information_schema.key_column_usage kcu " +
+                "  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema " +
+                "WHERE tc.table_schema = 'public' AND tc.table_name = '" + table + "' " +
+                "AND tc.constraint_type = 'PRIMARY KEY' AND kcu.column_name = '" + column + "'");
+        rs.next();
+        assertEquals(1, rs.getInt(1),
+                "Column '" + table + "." + column + "' should be the primary key");
+    }
+
+    private void assertForeignKey(Connection conn, String table, String column) throws Exception {
+        ResultSet rs = conn.createStatement().executeQuery(
+                "SELECT COUNT(*) FROM information_schema.table_constraints tc " +
+                "JOIN information_schema.key_column_usage kcu " +
+                "  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema " +
+                "WHERE tc.table_schema = 'public' AND tc.table_name = '" + table + "' " +
+                "AND tc.constraint_type = 'FOREIGN KEY' AND kcu.column_name = '" + column + "'");
+        rs.next();
+        assertEquals(1, rs.getInt(1),
+                "Column '" + table + "." + column + "' should have a foreign key constraint");
     }
 
     private ConnectionPool buildPool(PostgresTestContainer container) {

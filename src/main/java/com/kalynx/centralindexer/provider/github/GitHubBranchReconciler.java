@@ -48,21 +48,28 @@ import java.util.TreeMap;
  */
 final class GitHubBranchReconciler extends AbstractGithubReconciler {
 
-    private static final Logger log = LoggerFactory.getLogger(GitHubBranchReconciler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(GitHubBranchReconciler.class);
     private static final String REVIEWS_PATH_PREFIX = "reviews/";
     private static final int COMPARE_FILE_LIMIT = 250;
 
     private final HttpClient http;
+    private final MetricsCollector metrics;
 
-    GitHubBranchReconciler() {
+    GitHubBranchReconciler(MetricsCollector metrics) {
         this.http = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
+        this.metrics = metrics;
     }
 
-    GitHubBranchReconciler(HttpClient http) {
+    GitHubBranchReconciler() {
+        this((MetricsCollector) null);
+    }
+
+    GitHubBranchReconciler(HttpClient http, MetricsCollector metrics) {
         this.http = http;
+        this.metrics = metrics;
     }
 
     /**
@@ -74,28 +81,29 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
      * @return the 40-character commit SHA, or {@code null}
      */
     String fetchKalynxReviewHead(String repository, ProviderConfig config) {
-        String token = config.properties().get("apiToken");
-        if (token == null || token.isBlank()) {
-            log.warn("No apiToken configured; cannot fetch kalynx-reviews HEAD for {}", repository);
+        String token = config.properties().get(GitHubConstants.PROP_API_TOKEN);
+        if (GitHubConstants.isTokenMissing(token)) {
+            LOGGER.warn("No apiToken configured; cannot fetch kalynx-reviews HEAD for {}", repository);
             return null;
         }
-        String url = getApiUrl() + "/repos/" + repository + "/git/ref/heads/kalynx-reviews";
+        String branchName = config.properties().getOrDefault(
+                GitHubConstants.PROP_REVIEWS_BRANCH_NAME, GitHubConstants.DEFAULT_REVIEWS_BRANCH_NAME);
+        String url = getApiUrl() + "/repos/" + repository + "/git/ref/heads/" + branchName;
         try {
             HttpRequest request = buildRequest(url, token);
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            MetricsCollector mc = MetricsCollector.getInstance();
-            if (mc != null) mc.recordProviderApiCall();
+            if (metrics != null) metrics.recordProviderApiCall();
             if (response.statusCode() == 401) {
-                log.warn("GitHub Git Refs API returned 401 Unauthorized for {} — " +
+                LOGGER.warn("GitHub Git Refs API returned 401 Unauthorized for {} — " +
                          "verify that 'apiToken' in plugin configuration is valid and not expired", repository);
                 return null;
             }
             if (response.statusCode() == 404) {
-                log.debug("kalynx-reviews branch not found for {}", repository);
+                LOGGER.debug("kalynx-reviews branch not found for {}", repository);
                 return null;
             }
             if (response.statusCode() != 200) {
-                log.warn("GitHub Git Refs API returned {} for {}", response.statusCode(), repository);
+                LOGGER.warn("GitHub Git Refs API returned {} for {}", response.statusCode(), repository);
                 return null;
             }
             JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
@@ -104,9 +112,9 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.warn("Error fetching kalynx-reviews HEAD for {}: {} — {}",
+            LOGGER.warn("Error fetching kalynx-reviews HEAD for {}: {} — {}",
                     repository, e.getClass().getSimpleName(), e.getMessage());
-            log.debug("Full exception for {}", repository, e);
+            LOGGER.debug("Full exception for {}", repository, e);
             return null;
         }
     }
@@ -119,7 +127,7 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
      * which returns the net set of files changed across the entire commit range. Each file whose
      * path matches {@code reviews/{reviewId}/{streamName}} produces one {@link ReviewEvent}.
      * The GitHub Compare API returns at most {@value #COMPARE_FILE_LIMIT} files; a warning is
-     * logged if the range is larger.
+     * LOGGERged if the range is larger.
      *
      * @param repository the canonical {@code owner/repo} identifier
      * @param fromCommit the exclusive lower-bound commit SHA (the stored cursor)
@@ -129,35 +137,34 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
      */
     boolean reconcileFromCommit(String repository, String fromCommit, String toCommit,
                                 ProviderConfig config, EventSink sink) {
-        String token = config.properties().get("apiToken");
-        if (token == null || token.isBlank()) {
-            log.warn("No apiToken configured; cannot reconcile {} from commit", repository);
+        String token = config.properties().get(GitHubConstants.PROP_API_TOKEN);
+        if (GitHubConstants.isTokenMissing(token)) {
+            LOGGER.warn("No apiToken configured; cannot reconcile {} from commit", repository);
             return false;
         }
         String url = getApiUrl() + "/repos/" + repository + "/compare/" + fromCommit + "..." + toCommit;
         try {
             HttpRequest request = buildRequest(url, token);
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            MetricsCollector mc2 = MetricsCollector.getInstance();
-            if (mc2 != null) mc2.recordProviderApiCall();
+            if (metrics != null) metrics.recordProviderApiCall();
             if (response.statusCode() != 200) {
-                log.warn("GitHub Compare API returned {} for {} ({}...{})",
+                LOGGER.warn("GitHub Compare API returned {} for {} ({}...{})",
                         response.statusCode(), repository,
                         abbrev(fromCommit), abbrev(toCommit));
                 return false;
             }
             JsonObject compare = JsonParser.parseString(response.body()).getAsJsonObject();
-            logCompareStats(compare, repository, fromCommit, toCommit);
+            LOGGERCompareStats(compare, repository, fromCommit, toCommit);
             emitEventsFromFiles(compare, repository, toCommit, token, sink);
             return true;
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.warn("Error reconciling {} ({}...{}): {} — {}",
+            LOGGER.warn("Error reconciling {} ({}...{}): {} — {}",
                     repository, abbrev(fromCommit), abbrev(toCommit),
                     e.getClass().getSimpleName(), e.getMessage());
-            log.debug("Full exception for {}", repository, e);
+            LOGGER.debug("Full exception for {}", repository, e);
             return false;
         }
     }
@@ -171,12 +178,12 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
      * @param sink          the event sink to receive the branch events
      */
     void reconcileAllBranches(String repository, ProviderConfig config, EventSink sink) {
-        String token = config.properties().get("apiToken");
-        if (token == null || token.isBlank()) {
-            log.warn("No apiToken configured; cannot reconcile branches for {}", repository);
+        String token = config.properties().get(GitHubConstants.PROP_API_TOKEN);
+        if (GitHubConstants.isTokenMissing(token)) {
+            LOGGER.warn("No apiToken configured; cannot reconcile branches for {}", repository);
             return;
         }
-        String repositoryUrl = "https://github.com/" + repository;
+        String repositoryUrl = GitHubConstants.GITHUB_BASE_URL + repository;
         int page = 1;
         int total = 0;
         while (true) {
@@ -197,13 +204,13 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
                     sink.submit(event);
                     total++;
                 } catch (RuntimeException e) {
-                    log.warn("Failed to submit branch event for {}/{}: {}",
+                    LOGGER.warn("Failed to submit branch event for {}/{}: {}",
                             repository, name, e.getMessage());
                 }
             }
             page++;
         }
-        log.info("Reconciled {} branch(es) for {}", total, repository);
+        LOGGER.info("Reconciled {} branch(es) for {}", total, repository);
     }
 
     /**
@@ -221,9 +228,9 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
      */
     boolean reconcileFullReviewTree(String repository, String headCommit,
                                      ProviderConfig config, EventSink sink) {
-        String token = config.properties().get("apiToken");
-        if (token == null || token.isBlank()) {
-            log.warn("No apiToken configured; cannot reconcile full review tree for {}", repository);
+        String token = config.properties().get(GitHubConstants.PROP_API_TOKEN);
+        if (GitHubConstants.isTokenMissing(token)) {
+            LOGGER.warn("No apiToken configured; cannot reconcile full review tree for {}", repository);
             return false;
         }
         String url = getApiUrl() + "/repos/" + repository + "/git/trees/" + headCommit + "?recursive=1";
@@ -232,13 +239,13 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
 
         JsonObject treeResponse = JsonParser.parseString(body).getAsJsonObject();
         if (treeResponse.has("truncated") && treeResponse.get("truncated").getAsBoolean()) {
-            log.warn("GitHub Trees API response for {} is truncated — review index may be incomplete",
+            LOGGER.warn("GitHub Trees API response for {} is truncated — review index may be incomplete",
                     repository);
         }
 
         JsonArray tree = treeResponse.getAsJsonArray("tree");
         if (tree == null || tree.isEmpty()) {
-            log.debug("kalynx-reviews tree is empty for {}", repository);
+            LOGGER.debug("kalynx-reviews tree is empty for {}", repository);
             return true;
         }
 
@@ -294,11 +301,11 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
                 sink.submit(event);
                 emitted++;
             } catch (RuntimeException e) {
-                log.warn("Failed to submit review tree event for {} in {}: {}",
+                LOGGER.warn("Failed to submit review tree event for {} in {}: {}",
                         reviewId, repository, e.getMessage());
             }
         }
-        log.info("Emitted {} review event(s) for {} from full tree ({} unique review(s))",
+        LOGGER.info("Emitted {} review event(s) for {} from full tree ({} unique review(s))",
                 emitted, repository, seenReviewIds.size());
         return true;
     }
@@ -339,20 +346,20 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
                 }
             }
         } catch (Exception e) {
-            log.debug("Failed to parse blob {} for {}: {}", blobSha, repository, e.getMessage());
+            LOGGER.debug("Failed to parse blob {} for {}: {}", blobSha, repository, e.getMessage());
         }
         return null;
     }
 
-    private void logCompareStats(JsonObject compare, String repository,
+    private void LOGGERCompareStats(JsonObject compare, String repository,
                                   String fromCommit, String toCommit) {
         int aheadBy = compare.has("ahead_by") ? compare.get("ahead_by").getAsInt() : -1;
-        log.info("Reconciling {} commit(s) for {} ({}...{})",
+        LOGGER.info("Reconciling {} commit(s) for {} ({}...{})",
                 aheadBy < 0 ? "unknown" : String.valueOf(aheadBy),
                 repository, abbrev(fromCommit), abbrev(toCommit));
         if (aheadBy > COMPARE_FILE_LIMIT) {
-            log.warn("{} commits in range for {} exceeds GitHub Compare limit of {} files — " +
-                     "reconciliation may be partial; run BackfillMain for full consistency.",
+            LOGGER.warn("{} commits in range for {} exceeds GitHub Compare limit of {} files — " +
+                     "reconciliation may be partial.",
                      aheadBy, repository, COMPARE_FILE_LIMIT);
         }
     }
@@ -360,7 +367,7 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
     private void emitEventsFromFiles(JsonObject compare, String repository,
                                       String toCommit, String token, EventSink sink) {
         if (!compare.has("files") || compare.get("files").isJsonNull()) {
-            log.debug("No files in compare response for {}", repository);
+            LOGGER.debug("No files in compare response for {}", repository);
             return;
         }
         Instant timestamp = extractHeadTimestamp(compare, toCommit);
@@ -420,11 +427,11 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
                 sink.submit(event);
                 emitted++;
             } catch (RuntimeException e) {
-                log.warn("Failed to submit reconciled event for review {} in {}: {}",
+                LOGGER.warn("Failed to submit reconciled event for review {} in {}: {}",
                         reviewId, repository, e.getMessage());
             }
         }
-        log.info("Emitted {} reconciled event(s) for {} ({} unique review(s))",
+        LOGGER.info("Emitted {} reconciled event(s) for {} ({} unique review(s))",
                 emitted, repository, seenReviewIds.size());
     }
 
@@ -459,22 +466,21 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
         try {
             HttpResponse<String> response = http.send(
                     buildRequest(url, token), HttpResponse.BodyHandlers.ofString());
-            MetricsCollector mc = MetricsCollector.getInstance();
-            if (mc != null) mc.recordProviderApiCall();
+            if (metrics != null) metrics.recordProviderApiCall();
             if (response.statusCode() == 401) {
-                log.warn("GitHub API returned 401 Unauthorized for {} — " +
+                LOGGER.warn("GitHub API returned 401 Unauthorized for {} — " +
                          "verify that 'apiToken' in plugin configuration is valid and not expired", url);
                 return null;
             }
             if (response.statusCode() != 200) {
-                log.warn("GitHub API returned {} for {}", response.statusCode(), url);
+                LOGGER.warn("GitHub API returned {} for {}", response.statusCode(), url);
                 return null;
             }
             return response.body();
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            log.warn("Error fetching {}: {} — {}", url, e.getClass().getSimpleName(), e.getMessage());
-            log.debug("Full exception for {}", url, e);
+            LOGGER.warn("Error fetching {}: {} — {}", url, e.getClass().getSimpleName(), e.getMessage());
+            LOGGER.debug("Full exception for {}", url, e);
             return null;
         }
     }
@@ -482,9 +488,9 @@ final class GitHubBranchReconciler extends AbstractGithubReconciler {
     private HttpRequest buildRequest(String url, String token) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("Authorization", "Bearer " + token.strip())
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("Authorization", GitHubConstants.BEARER_PREFIX + token.strip())
+                .header("Accept", GitHubConstants.ACCEPT_HEADER)
+                .header(GitHubConstants.API_VERSION_HEADER, GitHubConstants.API_VERSION)
                 .GET()
                 .build();
     }

@@ -38,7 +38,7 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void notesRefFirstOccurrenceEmitsReviewCreated() throws Exception {
+    void handle_notesRefFirstOccurrence_emitsReviewCreated() throws Exception {
         byte[] body = buildPushBody(REPO, "refs/notes/reviews/rev-001/metadata/title",
                 "abc123", "jane.doe", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders(body, "push", "delivery-1"), body);
@@ -53,7 +53,7 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void notesRefSecondOccurrenceEmitsReviewUpdated() throws Exception {
+    void handle_notesRefSecondOccurrence_emitsReviewUpdated() throws Exception {
         byte[] body = buildPushBody(REPO, "refs/notes/reviews/rev-002/metadata/title",
                 "abc123", "jane.doe", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders(body, "push", "delivery-1"), body);
@@ -65,7 +65,7 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void commentTextRefEmitsReviewCommentAdded() throws Exception {
+    void handle_commentTextRef_emitsReviewCommentAdded() throws Exception {
         byte[] body = buildPushBody(REPO, "refs/notes/reviews/rev-003/comments/1/text",
                 "abc123", "bob", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders(body, "push", "delivery-3"), body);
@@ -75,7 +75,7 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void branchHeadRefEmitsBranchUpdated() throws Exception {
+    void handle_branchHeadRef_emitsBranchUpdated() throws Exception {
         byte[] body = buildPushBody(REPO, "refs/heads/main",
                 "deadbeef1234", "jane.doe", "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders(body, "push", "delivery-4"), body);
@@ -90,7 +90,7 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void branchDeletedEmitsBranchDeleted() throws Exception {
+    void handle_branchDeleted_emitsBranchDeleted() throws Exception {
         byte[] body = buildDeleteBody(REPO, "refs/heads/feature-x", "jane.doe");
         handler.handle(buildHeaders(body, "push", "delivery-5"), body);
 
@@ -99,7 +99,7 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void invalidSignatureDiscards() throws Exception {
+    void handle_invalidSignature_discardsEvent() throws Exception {
         byte[] body = buildPushBody(REPO, "refs/notes/reviews/rev-bad/metadata/title",
                 "abc123", "jane.doe", "2026-05-19T10:00:00Z");
         Map<String, String> headers = Map.of(
@@ -111,14 +111,14 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void nonPushEventDiscards() throws Exception {
+    void handle_nonPushEvent_discardsEvent() throws Exception {
         byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
         handler.handle(Map.of("x-github-event", "pull_request"), body);
         assertTrue(submitted.isEmpty());
     }
 
     @Test
-    void unrecognisedRefDiscards() throws Exception {
+    void handle_unrecognisedRef_discardsEvent() throws Exception {
         byte[] body = buildPushBody(REPO, "refs/tags/v1.0", "abc123", "jane.doe",
                 "2026-05-19T10:00:00Z");
         handler.handle(buildHeaders(body, "push", "delivery-tag"), body);

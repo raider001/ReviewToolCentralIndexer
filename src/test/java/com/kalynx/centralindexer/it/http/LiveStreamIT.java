@@ -72,7 +72,7 @@ class LiveStreamIT {
     }
 
     @Test
-    void eventSubmittedViaSinkReachesSSEClient() throws Exception {
+    void submit_reviewCreatedEvent_reachesSSEClient() throws Exception {
         BlockingQueue<String> lines = connectSse("owner/live-test");
         Thread.sleep(300);
         sink.submit(testEvent("owner/live-test", "delivery-live-1"));

@@ -21,12 +21,12 @@ class MetricsCollectorTest {
     // --- connected clients ---
 
     @Test
-    void connectedClientsStartsAtZero() {
+    void getConnectedClients_initialState_returnsZero() {
         assertEquals(0, metrics.getConnectedClients());
     }
 
     @Test
-    void incrementAndDecrementConnectedClients() {
+    void incrementAndDecrement_connectedClients_updatesCount() {
         metrics.incrementConnectedClients();
         metrics.incrementConnectedClients();
         assertEquals(2, metrics.getConnectedClients());
@@ -38,15 +38,15 @@ class MetricsCollectorTest {
     // --- SSE event rate ---
 
     @Test
-    void writersPerSecondIsZeroWithNoEvents() {
+    void getSseWritersPerSecond_noEvents_returnsZero() {
         assertEquals(0.0, metrics.getSseWritersPerSecond(), 0.01);
     }
 
     @Test
-    void writersPerSecondCountsRecentEvents() throws InterruptedException {
-        metrics.recordSseEvent();
-        metrics.recordSseEvent();
-        metrics.recordSseEvent();
+    void getSseWritersPerSecond_recentEvents_countsAll() throws InterruptedException {
+        metrics.recordSseEvent("test.event");
+        metrics.recordSseEvent("test.event");
+        metrics.recordSseEvent("test.event");
 
         double rate = metrics.getSseWritersPerSecond();
         assertEquals(3.0, rate, 0.01, "Three events recorded within 1s must count");
@@ -55,7 +55,7 @@ class MetricsCollectorTest {
     // --- latency percentiles ---
 
     @Test
-    void p95ReturnsMinusOneWithInsufficientSamples() {
+    void getSseWriteLatencyP95_insufficientSamples_returnsMinusOne() {
         // fewer than 20 samples → -1
         for (int i = 0; i < 19; i++) {
             metrics.recordSseWriteLatency(10);
@@ -64,7 +64,7 @@ class MetricsCollectorTest {
     }
 
     @Test
-    void p95ComputedCorrectlyWith100Samples() {
+    void getSseWriteLatencyP95_hundredSamples_computesCorrectly() {
         for (int i = 1; i <= 100; i++) {
             metrics.recordSseWriteLatency(i); // 1..100 ms
         }
@@ -75,7 +75,7 @@ class MetricsCollectorTest {
     }
 
     @Test
-    void reviewsAndBranchesLatencyTrackedIndependently() {
+    void recordLatency_reviewsAndBranches_trackedIndependently() {
         for (int i = 0; i < 20; i++) {
             metrics.recordReviewsQueryLatency(50);
             metrics.recordBranchesQueryLatency(20);
@@ -84,23 +84,10 @@ class MetricsCollectorTest {
         assertEquals(20, metrics.getBranchesQueryP95());
     }
 
-    // --- backfill progress ---
-
-    @Test
-    void backfillProgressDefaultsToMinusOne() {
-        assertEquals(-1.0, metrics.getBackfillProgress(), 0.001);
-    }
-
-    @Test
-    void backfillProgressCanBeSet() {
-        metrics.setBackfillProgress(42.5);
-        assertEquals(42.5, metrics.getBackfillProgress(), 0.001);
-    }
-
     // --- pool stats (null pool) ---
 
     @Test
-    void poolStatsReturnMinusOneWhenPoolIsNull() {
+    void getPoolStats_nullPool_returnsMinusOne() {
         assertEquals(-1, metrics.getPoolActiveConnections());
         assertEquals(-1, metrics.getPoolWaitingThreads());
     }

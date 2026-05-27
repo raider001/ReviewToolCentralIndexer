@@ -20,14 +20,14 @@ import static org.mockito.Mockito.when;
  */
 class AuthFilterTest {
     @Test
-    void missingHeaderReturns401() throws Exception {
+    void handle_missingAuthHeader_returns401() throws Exception {
         AuthFilter filter = new AuthFilter(authConfig(true, "secret"), mock(HttpHandler.class));
         HttpExchange exchange = exchangeFor("/events", null);
         filter.handle(exchange);
         verify(exchange).sendResponseHeaders(eq(401), anyLong());
     }
     @Test
-    void wrongTokenReturns403() throws Exception {
+    void handle_wrongToken_returns403() throws Exception {
         HttpHandler downstream = mock(HttpHandler.class);
         AuthFilter filter = new AuthFilter(authConfig(true, "secret"), downstream);
         HttpExchange exchange = exchangeFor("/events", "Bearer wrong");
@@ -36,7 +36,7 @@ class AuthFilterTest {
         verify(downstream, never()).handle(any());
     }
     @Test
-    void correctTokenAllowsThrough() throws Exception {
+    void handle_correctToken_delegatesToDownstream() throws Exception {
         HttpHandler downstream = mock(HttpHandler.class);
         AuthFilter filter = new AuthFilter(authConfig(true, "secret"), downstream);
         HttpExchange exchange = exchangeFor("/events", "Bearer secret");
@@ -46,7 +46,7 @@ class AuthFilterTest {
         verify(exchange, never()).sendResponseHeaders(eq(403), anyLong());
     }
     @Test
-    void authDisabledAllowsAllRequests() throws Exception {
+    void handle_authDisabled_delegatesToDownstream() throws Exception {
         HttpHandler downstream = mock(HttpHandler.class);
         AuthFilter filter = new AuthFilter(authConfig(false, null), downstream);
         HttpExchange exchange = exchangeFor("/events", null);
@@ -56,7 +56,7 @@ class AuthFilterTest {
         verify(exchange, never()).sendResponseHeaders(eq(403), anyLong());
     }
     @Test
-    void healthAlwaysBypassesAuth() throws Exception {
+    void handle_healthPath_bypassesAuthAndDelegates() throws Exception {
         HttpHandler downstream = mock(HttpHandler.class);
         AuthFilter filter = new AuthFilter(authConfig(true, "secret"), downstream);
         HttpExchange exchange = exchangeFor("/health", null);
@@ -65,7 +65,7 @@ class AuthFilterTest {
         verify(exchange, never()).sendResponseHeaders(eq(401), anyLong());
     }
     @Test
-    void webhooksAlwaysBypassesAuth() throws Exception {
+    void handle_webhooksPath_bypassesAuthAndDelegates() throws Exception {
         HttpHandler downstream = mock(HttpHandler.class);
         AuthFilter filter = new AuthFilter(authConfig(true, "secret"), downstream);
         HttpExchange exchange = exchangeFor("/webhooks/push", null);

@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class BuiltInPluginRegistryTest {
 
     @Test
-    void createsGitHubPlugin() {
+    void create_githubProviderId_returnsGitHubPlugin() {
         ProviderPlugin plugin = BuiltInPluginRegistry.create("github");
         assertNotNull(plugin);
         assertInstanceOf(GitHubPlugin.class, plugin);
@@ -22,7 +22,7 @@ class BuiltInPluginRegistryTest {
     }
 
     @Test
-    void createsBitbucketPlugin() {
+    void create_bitbucketProviderId_returnsBitbucketPlugin() {
         ProviderPlugin plugin = BuiltInPluginRegistry.create("bitbucket");
         assertNotNull(plugin);
         assertInstanceOf(BitbucketPlugin.class, plugin);
@@ -30,7 +30,7 @@ class BuiltInPluginRegistryTest {
     }
 
     @Test
-    void createsGitLabPlugin() {
+    void create_gitlabProviderId_returnsGitLabPlugin() {
         ProviderPlugin plugin = BuiltInPluginRegistry.create("gitlab");
         assertNotNull(plugin);
         assertInstanceOf(GitLabPlugin.class, plugin);
@@ -38,30 +38,30 @@ class BuiltInPluginRegistryTest {
     }
 
     @Test
-    void returnsNullForUnknownProvider() {
+    void create_unknownProvider_returnsNull() {
         assertNull(BuiltInPluginRegistry.create("unknown-provider"));
     }
 
     @Test
-    void returnsNullForNullProviderId() {
+    void create_nullProviderId_returnsNull() {
         assertNull(BuiltInPluginRegistry.create(null));
     }
 
     @Test
-    void isBuiltInReturnsTrueForKnownProviders() {
+    void isBuiltIn_knownProvider_returnsTrue() {
         assertTrue(BuiltInPluginRegistry.isBuiltIn("github"));
         assertTrue(BuiltInPluginRegistry.isBuiltIn("bitbucket"));
         assertTrue(BuiltInPluginRegistry.isBuiltIn("gitlab"));
     }
 
     @Test
-    void isBuiltInReturnsFalseForUnknown() {
+    void isBuiltIn_unknownProvider_returnsFalse() {
         assertFalse(BuiltInPluginRegistry.isBuiltIn("custom-provider"));
         assertFalse(BuiltInPluginRegistry.isBuiltIn(null));
     }
 
     @Test
-    void eachCallCreatesNewInstance() {
+    void create_calledTwice_returnsDifferentInstances() {
         ProviderPlugin a = BuiltInPluginRegistry.create("github");
         ProviderPlugin b = BuiltInPluginRegistry.create("github");
         assertNotNull(a);

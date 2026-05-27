@@ -1,59 +1,35 @@
 package com.kalynx.centralindexer.metrics;
 
 import com.kalynx.centralindexer.db.ConnectionPool;
+import com.kalynx.centralindexer.lifecycle.Lifecycle;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.ThreadMXBean;
-import java.util.ArrayList;
+import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Central metrics store for the indexer. Collects latency samples, counters, and
  * time-windowed resource snapshots from instrumented handlers and exposes them for
  * the {@code GET /metrics} endpoint and the optional GUI.
  *
- * <p>All recording methods are thread-safe. A singleton instance is initialised by
- * {@link #initialize(ConnectionPool)} at startup and accessed via {@link #getInstance()}.
+ * <p>All recording methods are thread-safe. Construct one instance in {@code Main}
+ * and pass it through the object graph — there is no static singleton.
  *
  * <p>Time-series data (CPU, memory, connections, provider API calls) is retained for
  * up to 24 hours and sampled every second from a background thread started by
  * {@link #start()}.
  */
-public final class MetricsCollector {
-
-    // --- singleton ---------------------------------------------------------------
-
-    private static volatile MetricsCollector instance;
-
-    /**
-     * Initialises the singleton instance with the given connection pool.
-     * Must be called exactly once before {@link #getInstance()}.
-     */
-    public static MetricsCollector initialize(ConnectionPool pool) {
-        MetricsCollector m = new MetricsCollector(pool);
-        instance = m;
-        return m;
-    }
-
-    /**
-     * Returns the singleton instance, or {@code null} if {@link #initialize} has not
-     * been called yet.
-     */
-    public static MetricsCollector getInstance() {
-        return instance;
-    }
+public final class MetricsCollector implements Lifecycle {
 
     // --- time-series buffer ------------------------------------------------------
 
@@ -108,54 +84,46 @@ public final class MetricsCollector {
     // --- constants ---------------------------------------------------------------
 
     private static final int WINDOW_SIZE = 1000;
-    private static final long ONE_SECOND_NANOS = 1_000_000_000L;
-    private static final long TWO_SECONDS_NANOS = 2 * ONE_SECOND_NANOS;
 
     // --- fields ------------------------------------------------------------------
 
-    private final ConnectionPool pool;
+    private final MemoryMetrics memory;
+    private final CpuMetrics cpu;
+    private final ConnectionMetrics connection;
+    private final SseEventMetrics sse;
 
-    // legacy per-request latency rings
-    private final AtomicLong connectedClients = new AtomicLong(0);
-    private final ConcurrentLinkedDeque<Long> sseEventNanos = new ConcurrentLinkedDeque<>();
-    private final long[] sseWriteLatencies  = new long[WINDOW_SIZE];
-    private final AtomicInteger sseWriteIdx = new AtomicInteger(0);
-    private final long[] reviewsLatencies   = new long[WINDOW_SIZE];
-    private final AtomicInteger reviewsIdx  = new AtomicInteger(0);
-    private final long[] branchesLatencies  = new long[WINDOW_SIZE];
-    private final AtomicInteger branchesIdx = new AtomicInteger(0);
-    private final AtomicReference<Double> backfillProgress = new AtomicReference<>(-1.0);
+    private final TimeSeriesBuffer apiCallSamples  = new TimeSeriesBuffer();
+    private final long[] reviewsLatencies          = new long[WINDOW_SIZE];
+    private final AtomicInteger reviewsIdx         = new AtomicInteger(0);
+    private final long[] branchesLatencies         = new long[WINDOW_SIZE];
+    private final AtomicInteger branchesIdx        = new AtomicInteger(0);
 
-    // time-series buffers (sampled every 1 s; one sample per provider HTTP call)
-    private final TimeSeriesBuffer cpuSamples         = new TimeSeriesBuffer();
-    private final TimeSeriesBuffer memorySamples      = new TimeSeriesBuffer();
-    private final TimeSeriesBuffer connectionSamples  = new TimeSeriesBuffer();
-    private final TimeSeriesBuffer apiCallSamples     = new TimeSeriesBuffer();
+    private final ConcurrentHashMap<String, TimeSeriesBuffer> sseEventsByType  = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimeSeriesBuffer> webhooksByType   = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TimeSeriesBuffer> restCallsByType  = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicInteger>   connectedClientIps = new ConcurrentHashMap<>();
 
-    // per-logical-core CPU buffers (one per core, same 24h window)
-    private final List<TimeSeriesBuffer> perCoreSamples;
+    private volatile long diskFreeMb  = 0;
+    private volatile long diskTotalMb = 0;
 
-    // ThreadMXBean state for JVM-only per-core CPU sampling
-    private final ThreadMXBean                threadMxBean = ManagementFactory.getThreadMXBean();
-    private final ConcurrentHashMap<Long,Long> prevThreadCpuNs = new ConcurrentHashMap<>();
-    private volatile long                      prevSampleNs    = System.nanoTime();
-
+    private final AtomicBoolean started = new AtomicBoolean(false);
     private ScheduledExecutorService sampler;
 
     // --- constructor -------------------------------------------------------------
 
     public MetricsCollector(ConnectionPool pool) {
-        this.pool = pool;
-        int cores = Runtime.getRuntime().availableProcessors();
-        List<TimeSeriesBuffer> bufs = new ArrayList<>(cores);
-        for (int i = 0; i < cores; i++) bufs.add(new TimeSeriesBuffer());
-        this.perCoreSamples = Collections.unmodifiableList(bufs);
+        this.memory     = new MemoryMetrics();
+        this.cpu        = new CpuMetrics();
+        this.connection = new ConnectionMetrics(pool);
+        this.sse        = new SseEventMetrics();
     }
 
     // --- lifecycle ---------------------------------------------------------------
 
-    /** Starts the 1-second background sampler for CPU, memory, connections, and per-core CPU. */
+    /** Starts the 1-second background sampler. Idempotent — safe to call more than once. */
+    @Override
     public void start() {
+        if (!started.compareAndSet(false, true)) return;
         sampler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "metrics-sampler");
             t.setDaemon(true);
@@ -165,71 +133,25 @@ public final class MetricsCollector {
     }
 
     /** Stops the background sampler. */
+    @Override
     public void stop() {
         if (sampler != null) sampler.shutdownNow();
     }
 
     private void sample() {
-        cpuSamples.record(readCpuPercent());
-        memorySamples.record(readMemoryMb());
-        connectionSamples.record(getPoolActiveConnections());
-
-        double[] corePercents = sampleJvmPerCore();
-        for (int i = 0; i < Math.min(corePercents.length, perCoreSamples.size()); i++) {
-            perCoreSamples.get(i).record(corePercents[i]);
-        }
-    }
-
-    /**
-     * Distributes the JVM's own thread CPU usage across N virtual cores using
-     * ThreadMXBean deltas. Each thread's CPU share (as % of one core) is bin-packed
-     * into the least-loaded virtual core, giving a meaningful per-core view of JVM load.
-     */
-    private double[] sampleJvmPerCore() {
-        int cores = perCoreSamples.size();
-        long[] ids = threadMxBean.getAllThreadIds();
-        long now       = System.nanoTime();
-        long elapsedNs = now - prevSampleNs;
-        prevSampleNs   = now;
-        if (elapsedNs <= 0) return new double[cores];
-
-        double[] threadPct = new double[ids.length];
-        Set<Long> live = new HashSet<>(ids.length * 2);
-        for (int i = 0; i < ids.length; i++) {
-            long id    = ids[i];
-            live.add(id);
-            long cpuNs = threadMxBean.getThreadCpuTime(id);
-            if (cpuNs < 0) continue;
-            Long prev = prevThreadCpuNs.put(id, cpuNs);
-            if (prev != null) {
-                threadPct[i] = Math.max(0, Math.min(100.0, (double)(cpuNs - prev) / elapsedNs * 100.0));
-            }
-        }
-        prevThreadCpuNs.keySet().retainAll(live);
-
-        // Sort descending so largest threads are bin-packed first
-        Arrays.sort(threadPct);
-        for (int lo = 0, hi = threadPct.length - 1; lo < hi; lo++, hi--) {
-            double tmp = threadPct[lo]; threadPct[lo] = threadPct[hi]; threadPct[hi] = tmp;
-        }
-
-        double[] coreLoad = new double[cores];
-        for (double pct : threadPct) {
-            if (pct <= 0) break;
-            int min = 0;
-            for (int c = 1; c < cores; c++) {
-                if (coreLoad[c] < coreLoad[min]) min = c;
-            }
-            coreLoad[min] = Math.min(100.0, coreLoad[min] + pct);
-        }
-        return coreLoad;
+        memory.record();
+        cpu.record();
+        connection.record();
+        File f = new File(".").getAbsoluteFile();
+        diskFreeMb  = f.getUsableSpace()  / (1024L * 1024L);
+        diskTotalMb = f.getTotalSpace()   / (1024L * 1024L);
     }
 
     // --- provider API call tracking ----------------------------------------------
 
     /**
-     * Records a single outbound HTTP call to an external provider API (GitHub, GitLab,
-     * Bitbucket). Each call is timestamped so windowed counts can be derived.
+     * Records a single outbound HTTP call to an external provider API.
+     * Each call is timestamped so windowed counts can be derived.
      */
     public void recordProviderApiCall() {
         apiCallSamples.record(1.0);
@@ -237,22 +159,41 @@ public final class MetricsCollector {
 
     // --- SSE client tracking -----------------------------------------------------
 
-    public void incrementConnectedClients() { connectedClients.incrementAndGet(); }
-    public void decrementConnectedClients() { connectedClients.decrementAndGet(); }
+    public void incrementConnectedClients(String clientIp) {
+        sse.incrementClients();
+        connectedClientIps.computeIfAbsent(clientIp, k -> new AtomicInteger(0)).incrementAndGet();
+    }
+
+    public void decrementConnectedClients(String clientIp) {
+        sse.decrementClients();
+        AtomicInteger count = connectedClientIps.get(clientIp);
+        if (count != null && count.decrementAndGet() <= 0) {
+            connectedClientIps.remove(clientIp, count);
+        }
+    }
 
     // --- SSE event / write latency -----------------------------------------------
 
-    public void recordSseWriteLatency(long millis) {
-        sseWriteLatencies[sseWriteIdx.getAndIncrement() % WINDOW_SIZE] = millis;
+    public void recordSseWriteLatency(long millis) { sse.recordWriteLatency(millis); }
+
+    public void recordSseEvent(String eventSseName) {
+        sse.recordEvent();
+        sseEventsByType.computeIfAbsent(eventSseName, k -> new TimeSeriesBuffer()).record(1.0);
     }
 
-    public void recordSseEvent() {
-        long now = System.nanoTime();
-        sseEventNanos.addLast(now);
-        Long oldest;
-        while ((oldest = sseEventNanos.peekFirst()) != null && now - oldest > TWO_SECONDS_NANOS) {
-            sseEventNanos.pollFirst();
-        }
+    public void incrementConnectedClients() { incrementConnectedClients("unknown"); }
+    public void decrementConnectedClients() { decrementConnectedClients("unknown"); }
+
+    // --- webhook tracking --------------------------------------------------------
+
+    public void recordWebhookCall(String pathSuffix) {
+        webhooksByType.computeIfAbsent(pathSuffix, k -> new TimeSeriesBuffer()).record(1.0);
+    }
+
+    // --- REST call tracking ------------------------------------------------------
+
+    public void recordRestCall(String endpoint) {
+        restCallsByType.computeIfAbsent(endpoint, k -> new TimeSeriesBuffer()).record(1.0);
     }
 
     // --- handler latencies -------------------------------------------------------
@@ -265,65 +206,55 @@ public final class MetricsCollector {
         branchesLatencies[branchesIdx.getAndIncrement() % WINDOW_SIZE] = millis;
     }
 
-    // --- backfill progress -------------------------------------------------------
+    // --- read accessors ----------------------------------------------------------
 
-    public void setBackfillProgress(double pct) { backfillProgress.set(pct); }
+    public long   getConnectedClients()     { return sse.getConnectedClients(); }
+    public double getSseWritersPerSecond()  { return sse.getWritersPerSecond(); }
+    public long   getSseWriteLatencyP95()  { return sse.getWriteLatencyP95(); }
+    public long   getReviewsQueryP95()      { return p95(reviewsLatencies,  reviewsIdx.get()); }
+    public long   getBranchesQueryP95()     { return p95(branchesLatencies, branchesIdx.get()); }
+    public int    getPoolActiveConnections(){ return connection.getActiveConnections(); }
+    public int    getPoolWaitingThreads()   { return connection.getWaitingThreads(); }
+    public long   getDiskFreeMb()           { return diskFreeMb; }
+    public long   getDiskTotalMb()          { return diskTotalMb; }
 
-    // --- read accessors (legacy) -------------------------------------------------
-
-    public long getConnectedClients() { return connectedClients.get(); }
-
-    public double getSseWritersPerSecond() {
-        long cutoff = System.nanoTime() - ONE_SECOND_NANOS;
-        long count = 0;
-        for (Long t : sseEventNanos) {
-            if (t >= cutoff) count++;
-        }
-        return count;
+    public Map<String, Long> getSseEventCountsByType(long windowMs) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        sseEventsByType.forEach((type, buf) -> result.put(type, buf.count(windowMs)));
+        return Collections.unmodifiableMap(result);
     }
 
-    public long getSseWriteLatencyP95()  { return p95(sseWriteLatencies, sseWriteIdx.get()); }
-    public long getReviewsQueryP95()     { return p95(reviewsLatencies,   reviewsIdx.get()); }
-    public long getBranchesQueryP95()    { return p95(branchesLatencies,  branchesIdx.get()); }
-    public double getBackfillProgress()  { return backfillProgress.get(); }
+    public Map<String, Long> getWebhookCountsByType(long windowMs) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        webhooksByType.forEach((type, buf) -> result.put(type, buf.count(windowMs)));
+        return Collections.unmodifiableMap(result);
+    }
 
-    public int getPoolActiveConnections() { return pool != null ? pool.getActiveConnections() : -1; }
-    public int getPoolWaitingThreads()    { return pool != null ? pool.getWaitingThreads()    : -1; }
+    public Map<String, Long> getRestCallCountsByType(long windowMs) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        restCallsByType.forEach((type, buf) -> result.put(type, buf.count(windowMs)));
+        return Collections.unmodifiableMap(result);
+    }
 
-    // --- time-series accessors (GUI) ---------------------------------------------
+    public Map<String, Integer> getConnectedClientIps() {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        connectedClientIps.forEach((ip, count) -> {
+            int n = count.get();
+            if (n > 0) result.put(ip, n);
+        });
+        return Collections.unmodifiableMap(result);
+    }
 
-    public TimeSeriesBuffer getCpuSamples()        { return cpuSamples; }
-    public TimeSeriesBuffer getMemorySamples()     { return memorySamples; }
-    public TimeSeriesBuffer getConnectionSamples() { return connectionSamples; }
-    public TimeSeriesBuffer getApiCallSamples()    { return apiCallSamples; }
+    // --- time-series accessors ---------------------------------------------------
 
-    // --- system stats ------------------------------------------------------------
-
-    /** Returns the per-core CPU sample buffers (one per logical core, oldest-first). */
-    public List<TimeSeriesBuffer> getPerCoreSamples() { return perCoreSamples; }
+    public TimeSeriesBuffer       getCpuSamples()        { return cpu.getSamples(); }
+    public TimeSeriesBuffer       getMemorySamples()     { return memory.getSamples(); }
+    public TimeSeriesBuffer       getConnectionSamples() { return connection.getSamples(); }
+    public TimeSeriesBuffer       getApiCallSamples()    { return apiCallSamples; }
+    public List<TimeSeriesBuffer> getPerCoreSamples()    { return cpu.getPerCoreSamples(); }
 
     /** Returns the JVM max-heap in MB, used as the memory chart Y-axis maximum. */
-    public static double memoryMaxMb() {
-        return Runtime.getRuntime().maxMemory() / (1024.0 * 1024.0);
-    }
-
-    private static double readCpuPercent() {
-        java.lang.management.OperatingSystemMXBean os =
-                java.lang.management.ManagementFactory.getOperatingSystemMXBean();
-        if (os instanceof com.sun.management.OperatingSystemMXBean sunOs) {
-            double load = sunOs.getProcessCpuLoad();
-            // [0,1] fraction of all CPUs combined → multiply by 100 for %.
-            return load < 0 ? 0.0 : load * 100.0;
-        }
-        double avg = os.getSystemLoadAverage();
-        return avg < 0 ? 0.0 : Math.min(100.0, avg / os.getAvailableProcessors() * 100.0);
-    }
-
-    private static double readMemoryMb() {
-        Runtime rt = Runtime.getRuntime();
-        long used = rt.totalMemory() - rt.freeMemory();
-        return used / (1024.0 * 1024.0);
-    }
+    public static double memoryMaxMb() { return MemoryMetrics.maxMb(); }
 
     // --- helpers -----------------------------------------------------------------
 

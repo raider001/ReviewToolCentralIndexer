@@ -21,6 +21,10 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -138,14 +142,23 @@ class BranchesLoadIT {
                 }
                 ps.executeBatch();
             }
+            Map<String, UUID> repoIds = new HashMap<>();
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO branches (owner, repository, branch_name, head_commit) VALUES (?, ?, ?, ?)")) {
+                    "SELECT repository || '' AS key, repository_id FROM repositories WHERE owner = 'owner'")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        repoIds.put(rs.getString("key"), (UUID) rs.getObject("repository_id"));
+                    }
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO branches (repository_id, branch_name, head_commit) VALUES (?, ?, ?)")) {
                 for (int r = 0; r < REPOS; r++) {
+                    UUID repoId = repoIds.get("repo-" + r);
                     for (int b = 0; b < BRANCHES_PER_REPO; b++) {
-                        ps.setString(1, "owner");
-                        ps.setString(2, "repo-" + r);
-                        ps.setString(3, String.format("branch-%03d", b));
-                        ps.setString(4, "sha" + r + b);
+                        ps.setObject(1, repoId);
+                        ps.setString(2, String.format("branch-%03d", b));
+                        ps.setString(3, "sha" + r + b);
                         ps.addBatch();
                     }
                 }

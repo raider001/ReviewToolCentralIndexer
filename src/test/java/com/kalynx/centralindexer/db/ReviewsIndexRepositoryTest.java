@@ -30,7 +30,7 @@ class ReviewsIndexRepositoryTest {
     }
 
     @Test
-    void upsertInvokesPreparedStatement() throws Exception {
+    void upsert_validParams_invokesPreparedStatement() throws Exception {
         repo.upsert("r-1", "OPEN", Instant.parse("2026-05-19T10:00:00Z"), "[]");
         verify(conn).prepareStatement(anyString());
     }

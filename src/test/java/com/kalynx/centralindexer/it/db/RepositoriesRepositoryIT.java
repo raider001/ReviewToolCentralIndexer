@@ -43,12 +43,12 @@ class RepositoriesRepositoryIT {
     }
 
     @Test
-    void findAllReturnsEmptyListWhenTableIsEmpty() throws Exception {
+    void findAll_emptyTable_returnsEmptyList() throws Exception {
         assertTrue(repo.findAll().isEmpty());
     }
 
     @Test
-    void findAllReturnsRepositoryWithNullKalynxReviewHead() throws Exception {
+    void findAll_repositoryWithNoHead_returnsNullKalynxReviewHead() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
 
         List<RepositoryRecord> results = repo.findAll();
@@ -62,7 +62,7 @@ class RepositoriesRepositoryIT {
     }
 
     @Test
-    void updateKalynxReviewHeadStoresHead() throws Exception {
+    void updateKalynxReviewHead_validOwnerAndRepo_storesHead() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
 
         repo.updateKalynxReviewHead("alice", "repo-a", "abc1234567890");
@@ -72,7 +72,7 @@ class RepositoriesRepositoryIT {
     }
 
     @Test
-    void updateKalynxReviewHeadOverwritesPreviousHead() throws Exception {
+    void updateKalynxReviewHead_existingHead_overwritesPreviousHead() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         repo.updateKalynxReviewHead("alice", "repo-a", "oldsha");
 
@@ -82,7 +82,7 @@ class RepositoriesRepositoryIT {
     }
 
     @Test
-    void findAllReturnsRepositoriesOrderedByOwnerThenRepository() throws Exception {
+    void findAll_multipleRepositories_orderedByOwnerThenRepository() throws Exception {
         insertRepository("bob", "z-repo", "https://example.com/z");
         insertRepository("alice", "b-repo", "https://example.com/b");
         insertRepository("alice", "a-repo", "https://example.com/a");
@@ -99,7 +99,7 @@ class RepositoriesRepositoryIT {
     }
 
     @Test
-    void findAllReturnsMixOfNullAndNonNullHeads() throws Exception {
+    void findAll_mixedHeads_returnsNullAndNonNull() throws Exception {
         insertRepository("alice", "repo-a", "https://example.com/a");
         insertRepository("alice", "repo-b", "https://example.com/b");
         repo.updateKalynxReviewHead("alice", "repo-b", "sha123");

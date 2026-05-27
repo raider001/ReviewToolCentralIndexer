@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConnectionPoolIT {
 
     @Test
-    void acquireAndRelease() throws Exception {
+    void acquire_validDatabase_returnsQueryableConnection() throws Exception {
         try (PostgresTestContainer container = new PostgresTestContainer()) {
             ConnectionPool pool = new ConnectionPool(buildConfig(container, 2));
             Connection conn = pool.acquire();
@@ -35,7 +35,7 @@ class ConnectionPoolIT {
     }
 
     @Test
-    void failsFastWhenDatabaseUnreachable() {
+    void acquire_unreachableDatabase_throwsDataSourceExceptionFast() {
         long start = System.currentTimeMillis();
         assertThrows(DataSourceException.class, () -> {
             DatabaseConfig config = GsonFactory.getInstance().fromJson("""

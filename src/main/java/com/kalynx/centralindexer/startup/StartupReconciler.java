@@ -6,140 +6,40 @@ import com.kalynx.centralindexer.spi.ProviderPlugin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.SQLException;
 import java.util.List;
 
 /**
- * Performs commit-based startup reconciliation for all tracked repositories.
+ * Coordinates startup reconciliation by delegating to focused {@link Reconciler} instances.
  *
- * <p>For each repository in the {@code repositories} table, the reconciler compares
- * the stored {@code kalynx_review_head} cursor against the live HEAD of
- * {@code refs/heads/kalynx-reviews} returned by the provider plugin. When they differ,
- * the plugin replays the missed commits as {@link com.kalynx.centralindexer.model.ReviewEvent}s
- * via its {@link com.kalynx.centralindexer.spi.EventSink}, then the cursor is advanced to
- * the new HEAD.
- *
- * <p>This closes the event gap caused by server crashes, OOM kills, and plugin failures —
- * all of which result in a process restart that triggers this reconciler. See
- * {@code Documentation/Design/recovery.md} scenarios 1, 3 (path E), 5, and 12.
- *
- * <p>The cursor is updated only after all events in the range have been submitted, so a
- * crash mid-reconciliation causes the next startup to re-reconcile the same range
- * (idempotent, since upserts gate on {@code last_updated}).
- *
- * <p>If the plugin returns {@code null} from
- * {@link ProviderPlugin#fetchKalynxReviewHead}, the repository is skipped — either the
- * branch does not exist yet or the plugin does not support commit-based reconciliation.
+ * <p>Reconcilers run in order: branches first, then review refs. Per-reconciler failures
+ * are handled internally — the coordinator does not propagate them.
  */
 public final class StartupReconciler {
 
-    private static final Logger log = LoggerFactory.getLogger(StartupReconciler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(StartupReconciler.class);
 
-    private final RepositoriesRepository repositoriesRepository;
-    private final ProviderPlugin plugin;
+    private final BranchReconciler branchReconciler;
+    private final ReviewReconciler reviewReconciler;
 
     public StartupReconciler(RepositoriesRepository repositoriesRepository, ProviderPlugin plugin) {
-        this.repositoriesRepository = repositoriesRepository;
-        this.plugin = plugin;
+        this.branchReconciler = new BranchReconciler(repositoriesRepository, plugin);
+        this.reviewReconciler = new ReviewReconciler(repositoriesRepository, plugin);
     }
 
-    /**
-     * Runs the reconciliation pass for all tracked repositories.
-     *
-     * <p>Per-repository failures are logged and skipped so that a single unreachable
-     * repository does not block reconciliation for the others.
-     *
-     * @throws SQLException         if reading the repositories table fails
-     * @throws InterruptedException if the thread is interrupted during a DB operation
-     */
-    public void run() throws SQLException, InterruptedException {
-        List<RepositoryRecord> repos = repositoriesRepository.findAll();
-        if (repos.isEmpty()) {
-            log.debug("No repositories registered — skipping startup reconciliation");
-            return;
+    public void run() {
+        LOGGER.info("Starting startup reconciliation");
+        for (Reconciler r : List.of(branchReconciler, reviewReconciler)) {
+            r.reconcile();
         }
-        log.info("Starting startup reconciliation for {} repository/repositories", repos.size());
-        for (RepositoryRecord repo : repos) {
-            reconcileRepository(repo);
-        }
-        log.info("Startup reconciliation complete");
+        LOGGER.info("Startup reconciliation complete");
     }
 
     public void reconcileRepository(RepositoryRecord repo) {
-        String repoPath = repo.owner() + "/" + repo.repository();
-
-        // Always refresh all branches on startup (idempotent upserts).
-        try {
-            plugin.reconcileAllBranches(repoPath);
-        } catch (Exception e) {
-            log.warn("Branch reconciliation failed for {} — continuing with review reconciliation: {}",
-                    repoPath, e.getMessage());
-        }
-
-        reconcileKalynxReviews(repo);
+        branchReconciler.reconcileOne(repo);
+        reviewReconciler.reconcileOne(repo);
     }
 
-    /**
-     * Reconciles the {@code kalynx-reviews} orphan branch for one repository.
-     * Fetches the live HEAD directly from the provider plugin (not from the {@code branches}
-     * table, which never contains orphan branches), then replays any missed commits.
-     *
-     * <p>Safe to call outside the startup sequence — used by the live-update path when a
-     * {@code kalynx-reviews} push webhook arrives.
-     */
     public void reconcileKalynxReviews(RepositoryRecord repo) {
-        String repoPath = repo.owner() + "/" + repo.repository();
-        try {
-            String liveHead = plugin.fetchKalynxReviewHead(repoPath);
-            if (liveHead == null) {
-                log.debug("{}: kalynx-reviews branch not found or plugin does not support fetch " +
-                          "— review reconciliation skipped", repoPath);
-                return;
-            }
-
-            String storedHead = repo.kalynxReviewHead();
-            if (storedHead == null) {
-                // First run — index the full tree then record the cursor.
-                log.info("{}: no prior cursor — indexing full kalynx-reviews tree at {}",
-                        repoPath, abbrev(liveHead));
-                boolean ok = plugin.reconcileFullReviewTree(repoPath, liveHead);
-                if (ok) {
-                    repositoriesRepository.updateKalynxReviewHead(repo.owner(), repo.repository(), liveHead);
-                    log.info("{}: full tree indexed, cursor set to {}", repoPath, abbrev(liveHead));
-                } else {
-                    log.warn("{}: full tree reconciliation failed — cursor not advanced; will retry on next startup",
-                            repoPath);
-                }
-                return;
-            }
-
-            if (liveHead.equals(storedHead)) {
-                log.debug("{} reviews up to date (head={})", repoPath, abbrev(storedHead));
-                return;
-            }
-
-            log.info("Gap detected for {}: stored={} live={} — reconciling",
-                    repoPath, abbrev(storedHead), abbrev(liveHead));
-            boolean ok = plugin.reconcileFromCommit(repoPath, storedHead, liveHead);
-            if (ok) {
-                repositoriesRepository.updateKalynxReviewHead(repo.owner(), repo.repository(), liveHead);
-                log.info("Review reconciliation complete for {} (cursor → {})", repoPath, abbrev(liveHead));
-            } else {
-                log.warn("Review reconciliation failed for {} — cursor not advanced; will retry on next startup",
-                        repoPath);
-            }
-
-        } catch (SQLException | InterruptedException e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            log.warn("DB error during review reconciliation for {}: {}", repoPath, e.getMessage());
-        } catch (Exception e) {
-            log.warn("Review reconciliation failed for {}: {}", repoPath, e.getMessage());
-        }
-    }
-
-    private static String abbrev(String sha) {
-        return sha != null && sha.length() >= 7 ? sha.substring(0, 7) : sha;
+        reviewReconciler.reconcileOne(repo);
     }
 }

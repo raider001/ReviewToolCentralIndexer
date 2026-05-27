@@ -17,40 +17,40 @@ class HmacSignatureVerifierTest {
     private static final byte[] BODY = "{\"ref\":\"refs/heads/main\"}".getBytes(StandardCharsets.UTF_8);
 
     @Test
-    void validSignatureReturnsTrue() throws Exception {
+    void verify_validSignature_returnsTrue() throws Exception {
         String signature = "sha256=" + computeHmac(SECRET, BODY);
         assertTrue(HmacSignatureVerifier.verify(SECRET, BODY, signature));
     }
 
     @Test
-    void invalidHexSignatureReturnsFalse() {
+    void verify_invalidHexSignature_returnsFalse() {
         assertFalse(HmacSignatureVerifier.verify(SECRET, BODY, "sha256=deadbeef"));
     }
 
     @Test
-    void wrongSecretReturnsFalse() throws Exception {
+    void verify_wrongSecret_returnsFalse() throws Exception {
         String signature = "sha256=" + computeHmac("wrong-secret", BODY);
         assertFalse(HmacSignatureVerifier.verify(SECRET, BODY, signature));
     }
 
     @Test
-    void missingPrefixReturnsFalse() throws Exception {
+    void verify_signatureWithoutSha256Prefix_returnsFalse() throws Exception {
         String signature = computeHmac(SECRET, BODY);
         assertFalse(HmacSignatureVerifier.verify(SECRET, BODY, signature));
     }
 
     @Test
-    void nullSignatureReturnsFalse() {
+    void verify_nullSignature_returnsFalse() {
         assertFalse(HmacSignatureVerifier.verify(SECRET, BODY, null));
     }
 
     @Test
-    void nullSecretReturnsFalse() {
+    void verify_nullSecret_returnsFalse() {
         assertFalse(HmacSignatureVerifier.verify(null, BODY, "sha256=anything"));
     }
 
     @Test
-    void blankSecretReturnsFalse() {
+    void verify_blankSecret_returnsFalse() {
         assertFalse(HmacSignatureVerifier.verify("  ", BODY, "sha256=anything"));
     }
 

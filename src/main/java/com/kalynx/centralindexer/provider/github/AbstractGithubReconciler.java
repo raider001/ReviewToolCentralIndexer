@@ -5,7 +5,7 @@ import com.kalynx.centralindexer.provider.Reconciler;
 public class AbstractGithubReconciler implements Reconciler {
     @Override
     public String getApiUrl() {
-        return "https://api.github.com";
+        return GitHubConstants.GITHUB_API_BASE_URL;
     }
 
 }

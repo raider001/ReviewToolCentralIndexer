@@ -102,38 +102,31 @@ public final class PublisherRegistry {
         final AtomicInteger subscriberCount = new AtomicInteger(0);
     }
 
-    private static final class WatchingSubscriber<T> implements Flow.Subscriber<T> {
-
-        private final Flow.Subscriber<? super T> delegate;
-        private final Runnable onTerminal;
-
-        WatchingSubscriber(Flow.Subscriber<? super T> delegate, Runnable onTerminal) {
-            this.delegate = delegate;
-            this.onTerminal = onTerminal;
-        }
+    private record WatchingSubscriber<T>(Flow.Subscriber<? super T> delegate,
+                                         Runnable onTerminal) implements Flow.Subscriber<T> {
 
         @Override
-        public void onSubscribe(Flow.Subscription subscription) {
-            delegate.onSubscribe(new WatchingSubscription(subscription, onTerminal));
-        }
+            public void onSubscribe(Flow.Subscription subscription) {
+                delegate.onSubscribe(new WatchingSubscription(subscription, onTerminal));
+            }
 
-        @Override
-        public void onNext(T item) {
-            delegate.onNext(item);
-        }
+            @Override
+            public void onNext(T item) {
+                delegate.onNext(item);
+            }
 
-        @Override
-        public void onError(Throwable throwable) {
-            delegate.onError(throwable);
-            onTerminal.run();
-        }
+            @Override
+            public void onError(Throwable throwable) {
+                delegate.onError(throwable);
+                onTerminal.run();
+            }
 
-        @Override
-        public void onComplete() {
-            delegate.onComplete();
-            onTerminal.run();
+            @Override
+            public void onComplete() {
+                delegate.onComplete();
+                onTerminal.run();
+            }
         }
-    }
 
     private static final class WatchingSubscription implements Flow.Subscription {
 

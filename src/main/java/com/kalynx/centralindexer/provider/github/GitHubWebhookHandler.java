@@ -38,7 +38,7 @@ import java.util.Set;
  */
 public final class GitHubWebhookHandler implements WebhookHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(GitHubWebhookHandler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(GitHubWebhookHandler.class);
 
     private final ProviderConfig config;
     private final EventSink sink;
@@ -61,14 +61,14 @@ public final class GitHubWebhookHandler implements WebhookHandler {
         String deliveryId = headers.getOrDefault("x-github-delivery", "-");
 
         if (!"push".equals(event)) {
-            log.debug("Ignoring GitHub event type '{}' (delivery='{}')", event, deliveryId);
+            LOGGER.debug("Ignoring GitHub event type '{}' (delivery='{}')", event, deliveryId);
             return;
         }
 
         try {
             handlePush(rawBody, headers, deliveryId);
         } catch (Exception e) {
-            log.error("Failed to handle GitHub push delivery='{}': {}", deliveryId, e.getMessage(), e);
+            LOGGER.error("Failed to handle GitHub push delivery='{}': {}", deliveryId, e.getMessage(), e);
         }
     }
 
@@ -83,7 +83,7 @@ public final class GitHubWebhookHandler implements WebhookHandler {
 
         String sigHeader = headers.get("x-hub-signature-256");
         if (!HmacSignatureVerifier.verify(secret, rawBody, sigHeader)) {
-            log.warn("Invalid signature for GitHub push on repository {}", repoFullName);
+            LOGGER.warn("Invalid signature for GitHub push on repository {}", repoFullName);
             return;
         }
 
@@ -93,19 +93,19 @@ public final class GitHubWebhookHandler implements WebhookHandler {
                 ? json.getAsJsonObject("pusher").get("name").getAsString() : null;
         Instant timestamp = extractTimestamp(json);
 
-        log.info("GitHub push: repo='{}' ref='{}' actor='{}' delivery='{}'",
+        LOGGER.info("GitHub push: repo='{}' ref='{}' actor='{}' delivery='{}'",
                 repoFullName, ref, actorUser, deliveryId);
 
         ParsedRef parsed = ReviewRefParser.parse(ref);
         if (parsed == null) {
-            log.debug("Push ref '{}' on '{}' does not match a review ref — ignored", ref, repoFullName);
+            LOGGER.debug("Push ref '{}' on '{}' does not match a review ref — ignored", ref, repoFullName);
             return;
         }
 
         ReviewEvent reviewEvent = buildEvent(parsed, repoFullName, repoUrl, actorUser,
                 timestamp, afterHash, deliveryId);
         if (reviewEvent != null) {
-            log.info("Submitting event: type='{}' repo='{}' reviewId='{}' delivery='{}'",
+            LOGGER.info("Submitting event: type='{}' repo='{}' reviewId='{}' delivery='{}'",
                     reviewEvent.eventType(), reviewEvent.repository(),
                     reviewEvent.reviewId(), deliveryId);
             submit(reviewEvent);
@@ -139,7 +139,7 @@ public final class GitHubWebhookHandler implements WebhookHandler {
         try {
             sink.submit(event);
         } catch (RuntimeException e) {
-            log.warn("Failed to submit GitHub event for repository {}: {}",
+            LOGGER.warn("Failed to submit GitHub event for repository {}: {}",
                     event.repository(), e.getMessage());
         }
     }

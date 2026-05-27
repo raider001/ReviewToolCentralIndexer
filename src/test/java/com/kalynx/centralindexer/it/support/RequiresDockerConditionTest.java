@@ -13,14 +13,14 @@ import static org.mockito.Mockito.mock;
 class RequiresDockerConditionTest {
 
     @Test
-    void enabledWhenDockerAvailable() {
+    void evaluateExecutionCondition_dockerAvailable_conditionEnabled() {
         RequiresDockerCondition condition = new AlwaysAvailableCondition();
         ExtensionContext context = mock(ExtensionContext.class);
         assertFalse(condition.evaluateExecutionCondition(context).isDisabled());
     }
 
     @Test
-    void disabledWhenDockerUnavailable() {
+    void evaluateExecutionCondition_dockerUnavailable_conditionDisabled() {
         RequiresDockerCondition condition = new NeverAvailableCondition();
         ExtensionContext context = mock(ExtensionContext.class);
         assertTrue(condition.evaluateExecutionCondition(context).isDisabled());

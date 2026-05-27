@@ -29,14 +29,14 @@ class MetricsHandlerTest {
     }
 
     @Test
-    void getReturns200() throws Exception {
+    void handle_getRequest_returns200() throws Exception {
         HttpExchange exchange = buildExchange("GET");
         handler.handle(exchange);
         verify(exchange).sendResponseHeaders(eq(200), anyLong());
     }
 
     @Test
-    void responseBodyContainsTopLevelKeys() throws Exception {
+    void handle_getRequest_responseContainsTopLevelKeys() throws Exception {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         HttpExchange exchange = buildExchangeWithBody("GET", body);
         handler.handle(exchange);
@@ -45,11 +45,11 @@ class MetricsHandlerTest {
         assertTrue(json.contains("\"sse\""),       "must contain sse key");
         assertTrue(json.contains("\"db\""),        "must contain db key");
         assertTrue(json.contains("\"branches\""),  "must contain branches key");
-        assertTrue(json.contains("\"backfill\""),  "must contain backfill key");
+        assertTrue(json.contains("\"system\""),    "must contain system key");
     }
 
     @Test
-    void responseBodyContainsSseSubKeys() throws Exception {
+    void handle_getRequest_responseContainsSseSubKeys() throws Exception {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         HttpExchange exchange = buildExchangeWithBody("GET", body);
         handler.handle(exchange);
@@ -61,7 +61,7 @@ class MetricsHandlerTest {
     }
 
     @Test
-    void responseBodyContainsDbSubKeys() throws Exception {
+    void handle_getRequest_responseContainsDbSubKeys() throws Exception {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         HttpExchange exchange = buildExchangeWithBody("GET", body);
         handler.handle(exchange);
@@ -73,7 +73,7 @@ class MetricsHandlerTest {
     }
 
     @Test
-    void poolStatsAreMinusOneWhenPoolIsNull() throws Exception {
+    void handle_nullPool_poolStatsAreMinusOne() throws Exception {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         HttpExchange exchange = buildExchangeWithBody("GET", body);
         handler.handle(exchange);
@@ -85,14 +85,14 @@ class MetricsHandlerTest {
     }
 
     @Test
-    void postReturns405() throws Exception {
+    void handle_postRequest_returns405() throws Exception {
         HttpExchange exchange = buildExchange("POST");
         handler.handle(exchange);
         verify(exchange).sendResponseHeaders(eq(405), anyLong());
     }
 
     @Test
-    void putReturns405() throws Exception {
+    void handle_putRequest_returns405() throws Exception {
         HttpExchange exchange = buildExchange("PUT");
         handler.handle(exchange);
         verify(exchange).sendResponseHeaders(eq(405), anyLong());

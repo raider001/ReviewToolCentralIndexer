@@ -36,19 +36,29 @@ import java.util.Map;
  */
 public final class GitLabReconciler {
 
-    private static final Logger log = LoggerFactory.getLogger(GitLabReconciler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(GitLabReconciler.class);
 
     private final HttpClient http;
+    private final MetricsCollector metrics;
 
     /**
      * Creates a reconciler using the JDK default HTTP client.
+     *
+     * @param metrics the metrics collector for API call tracking; may be {@code null}
      */
-    public GitLabReconciler() {
+    public GitLabReconciler(MetricsCollector metrics) {
         this.http = HttpClient.newHttpClient();
+        this.metrics = metrics;
     }
 
-    GitLabReconciler(HttpClient http) {
+    /** No-arg constructor for tests and external SPI loading. */
+    public GitLabReconciler() {
+        this((MetricsCollector) null);
+    }
+
+    GitLabReconciler(HttpClient http, MetricsCollector metrics) {
         this.http = http;
+        this.metrics = metrics;
     }
 
     /**
@@ -64,7 +74,7 @@ public final class GitLabReconciler {
     public void reconcile(String repository, Instant since, ProviderConfig config, EventSink sink) {
         String token = config.properties().get("apiToken");
         if (token == null || token.isBlank()) {
-            log.warn("No apiToken configured for GitLab; skipping reconciliation of {}", repository);
+            LOGGER.warn("No apiToken configured for GitLab; skipping reconciliation of {}", repository);
             return;
         }
         String baseUrl = config.properties().getOrDefault("baseUrl", "https://gitlab.com");
@@ -91,7 +101,7 @@ public final class GitLabReconciler {
             try {
                 sink.submit(event);
             } catch (RuntimeException e) {
-                log.warn("Failed to submit reconciled GitLab event for {}: {}",
+                LOGGER.warn("Failed to submit reconciled GitLab event for {}: {}",
                         repository, e.getMessage());
             }
         }
@@ -106,10 +116,9 @@ public final class GitLabReconciler {
                     .build();
             HttpResponse<String> response = http.send(request,
                     HttpResponse.BodyHandlers.ofString());
-            MetricsCollector mc = MetricsCollector.getInstance();
-            if (mc != null) mc.recordProviderApiCall();
+            if (metrics != null) metrics.recordProviderApiCall();
             if (response.statusCode() != 200) {
-                log.warn("GitLab API returned {} for {}", response.statusCode(), url);
+                LOGGER.warn("GitLab API returned {} for {}", response.statusCode(), url);
                 return null;
             }
             return response.body();
@@ -117,7 +126,7 @@ public final class GitLabReconciler {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.warn("Error fetching GitLab branches from {}: {}", url, e.getMessage());
+            LOGGER.warn("Error fetching GitLab branches from {}: {}", url, e.getMessage());
             return null;
         }
     }

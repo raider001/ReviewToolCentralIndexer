@@ -38,20 +38,22 @@ class EventSinkImplTest {
         reviews  = mock(ReviewsIndexRepository.class);
         repos    = mock(RepositoriesRepository.class);
         when(repos.findByOwnerAndRepository(anyString(), anyString())).thenReturn(Optional.empty());
+        when(repos.upsert(anyString(), anyString(), anyString()))
+                .thenReturn(new RepositoryRecord("test-repo-id", "owner", "repo", "https://g/r", null));
         sink = new EventSinkImpl(registry, branches, reviews, repos);
     }
 
     // ── SSE is always published ───────────────────────────────────────────────
 
     @Test
-    void submitAlwaysPublishesToRegistry() {
+    void submit_anyEvent_publishesToRegistry() {
         ReviewEvent event = reviewEvent(EventType.REVIEW_CREATED, "rev-1", Map.of());
         sink.submit(event);
         verify(registry).publish(event);
     }
 
     @Test
-    void sseOnlyConstructorStillPublishes() {
+    void submit_sseOnlyConstructor_publishesToRegistry() {
         PublisherRegistry r = mock(PublisherRegistry.class);
         ReviewEvent event = reviewEvent(EventType.BRANCH_UPDATED, null,
                 Map.of("branch_name", "main", "head_commit", "abc", "repository_url", "https://g/r"));
@@ -62,7 +64,7 @@ class EventSinkImplTest {
     // ── BRANCH_UPDATED ────────────────────────────────────────────────────────
 
     @Test
-    void branchUpdated_upsertsRepositoryAndBranch() throws Exception {
+    void submit_branchUpdated_upsertsRepositoryAndBranch() throws Exception {
         ReviewEvent event = reviewEvent(EventType.BRANCH_UPDATED, null,
                 Map.of("branch_name", "main", "head_commit", "abc123",
                        "repository_url", "https://github.com/owner/repo.git"));
@@ -70,7 +72,7 @@ class EventSinkImplTest {
         sink.submit(event);
 
         verify(repos).upsert("owner", "repo", "https://github.com/owner/repo.git");
-        verify(branches).upsert("owner", "repo", "main", "abc123");
+        verify(branches).upsert("test-repo-id", "main", "abc123");
     }
 
     @Test
@@ -81,7 +83,7 @@ class EventSinkImplTest {
         sink.submit(event);
 
         verify(repos).upsert(anyString(), anyString(), anyString());
-        verify(branches, never()).upsert(any(), any(), any(), any());
+        verify(branches, never()).upsert(any(), any(), any());
     }
 
     @Test
@@ -92,20 +94,20 @@ class EventSinkImplTest {
         sink.submit(event);
 
         verify(repos, never()).upsert(any(), any(), any());
-        verify(branches, never()).upsert(any(), any(), any(), any());
+        verify(branches, never()).upsert(any(), any(), any());
     }
 
     // ── BRANCH_DELETED ────────────────────────────────────────────────────────
 
     @Test
-    void branchDeleted_upsertsRepositoryAndDeletesBranch() throws Exception {
+    void submit_branchDeleted_upsertsRepositoryAndDeletesBranch() throws Exception {
         ReviewEvent event = reviewEvent(EventType.BRANCH_DELETED, null,
                 Map.of("branch_name", "feature-x", "repository_url", "https://g/r"));
 
         sink.submit(event);
 
         verify(repos).upsert("owner", "repo", "https://g/r");
-        verify(branches).delete("owner", "repo", "feature-x");
+        verify(branches).delete("test-repo-id", "feature-x");
     }
 
     @Test
@@ -115,13 +117,13 @@ class EventSinkImplTest {
 
         sink.submit(event);
 
-        verify(branches, never()).delete(any(), any(), any());
+        verify(branches, never()).delete(any(), any());
     }
 
     // ── REVIEW events ─────────────────────────────────────────────────────────
 
     @Test
-    void reviewCreated_upsertsReviewsIndex() throws Exception {
+    void submit_reviewCreated_upsertsReviewsIndex() throws Exception {
         ReviewEvent event = reviewEvent(EventType.REVIEW_CREATED, "rev-42", Map.of());
 
         sink.submit(event);
@@ -130,10 +132,10 @@ class EventSinkImplTest {
     }
 
     @Test
-    void reviewCreated_includesUrlFromRepositoriesTable() throws Exception {
+    void submit_reviewCreated_includesUrlFromRepositoriesTable() throws Exception {
         when(repos.findByOwnerAndRepository("owner", "repo"))
                 .thenReturn(Optional.of(new RepositoryRecord(
-                        "owner", "repo", "https://stored-url.git", null)));
+                        "repo-uuid", "owner", "repo", "https://stored-url.git", null)));
         ReviewEvent event = reviewEvent(EventType.REVIEW_CREATED, "rev-7", Map.of());
 
         sink.submit(event);
@@ -143,14 +145,14 @@ class EventSinkImplTest {
     }
 
     @Test
-    void reviewUpdated_upsertsReviewsIndex() throws Exception {
+    void submit_reviewUpdated_upsertsReviewsIndex() throws Exception {
         ReviewEvent event = reviewEvent(EventType.REVIEW_UPDATED, "rev-99", Map.of());
         sink.submit(event);
         verify(reviews).upsert(eq("rev-99"), isNull(), any(), anyString());
     }
 
     @Test
-    void reviewCommentAdded_upsertsReviewsIndex() throws Exception {
+    void submit_reviewCommentAdded_upsertsReviewsIndex() throws Exception {
         ReviewEvent event = reviewEvent(EventType.REVIEW_COMMENT_ADDED, "rev-5", Map.of());
         sink.submit(event);
         verify(reviews).upsert(eq("rev-5"), isNull(), any(), anyString());
@@ -166,8 +168,8 @@ class EventSinkImplTest {
     // ── DB failure does not block SSE ─────────────────────────────────────────
 
     @Test
-    void dbFailure_doesNotPreventSsePublish() throws Exception {
-        doThrow(new RuntimeException("DB down")).when(branches).upsert(any(), any(), any(), any());
+    void submit_dbFailure_doesNotPreventSsePublish() throws Exception {
+        doThrow(new RuntimeException("DB down")).when(branches).upsert(any(), any(), any());
         ReviewEvent event = reviewEvent(EventType.BRANCH_UPDATED, null,
                 Map.of("branch_name", "main", "head_commit", "abc",
                        "repository_url", "https://g/r"));

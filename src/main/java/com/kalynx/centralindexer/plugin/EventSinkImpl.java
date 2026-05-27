@@ -42,7 +42,7 @@ import java.util.function.Consumer;
  */
 public final class EventSinkImpl implements EventSink {
 
-    private static final Logger log = LoggerFactory.getLogger(EventSinkImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(EventSinkImpl.class);
 
     private final PublisherRegistry publisherRegistry;
     private final BranchRepository branchRepository;
@@ -93,13 +93,13 @@ public final class EventSinkImpl implements EventSink {
 
     @Override
     public void submit(ReviewEvent event) {
-        log.info("Event received: type='{}' repo='{}' reviewId='{}'",
+        LOGGER.info("Event received: type='{}' repo='{}' reviewId='{}'",
                 event.eventType(), event.repository(), event.reviewId());
         publisherRegistry.publish(enrichWithRepoUrl(event));
         try {
             persist(event);
         } catch (Exception e) {
-            log.warn("Failed to persist {} event for '{}' to DB: {}",
+            LOGGER.warn("Failed to persist {} event for '{}' to DB: {}",
                     event.eventType(), event.repository(), e.getMessage());
         }
     }
@@ -137,7 +137,7 @@ public final class EventSinkImpl implements EventSink {
 
     private void persistBranchUpdated(ReviewEvent event) throws SQLException, InterruptedException {
         if (branchRepository == null) {
-            log.warn("DB persistence skipped for BRANCH_UPDATED '{}': branchRepository not wired",
+            LOGGER.warn("DB persistence skipped for BRANCH_UPDATED '{}': branchRepository not wired",
                     event.repository());
             return;
         }
@@ -148,29 +148,28 @@ public final class EventSinkImpl implements EventSink {
         String url         = event.payload().get("repository_url");
 
         if (url == null) {
-            log.warn("BRANCH_UPDATED for '{}' has no repository_url in payload — skipping DB write " +
+            LOGGER.warn("BRANCH_UPDATED for '{}' has no repository_url in payload — skipping DB write " +
                      "(payload keys: {})", event.repository(), event.payload().keySet());
             return;
         }
 
-        repositoriesRepository.upsert(owner, repo, url);
+        RepositoryRecord repoRecord = repositoriesRepository.upsert(owner, repo, url);
 
         if (seenRepositories.add(owner + "/" + repo)) {
             Consumer<RepositoryRecord> cb = newRepositoryCallback;
             if (cb != null) {
-                log.info("First push seen for '{}' — triggering dynamic onboarding", owner + "/" + repo);
-                RepositoryRecord record = new RepositoryRecord(owner, repo, url, null);
-                cb.accept(record);
+                LOGGER.info("First push seen for '{}' — triggering dynamic onboarding", owner + "/" + repo);
+                cb.accept(repoRecord);
             }
         }
-        log.debug("Repository upserted: {}/{} url='{}'", owner, repo, url);
+        LOGGER.debug("Repository upserted: {}/{} url='{}'", owner, repo, url);
 
         if (branchName != null && headCommit != null) {
-            branchRepository.upsert(owner, repo, branchName, headCommit);
-            log.debug("Branch upserted: {}/{} branch='{}' head='{}'",
+            branchRepository.upsert(repoRecord.repositoryId(), branchName, headCommit);
+            LOGGER.debug("Branch upserted: {}/{} branch='{}' head='{}'",
                     owner, repo, branchName, headCommit);
         } else {
-            log.warn("BRANCH_UPDATED for '{}' missing branch_name='{}' or head_commit='{}' — " +
+            LOGGER.warn("BRANCH_UPDATED for '{}' missing branch_name='{}' or head_commit='{}' — " +
                      "repository upserted but branch row skipped",
                     event.repository(), branchName, headCommit);
         }
@@ -178,7 +177,7 @@ public final class EventSinkImpl implements EventSink {
         if ("kalynx-reviews".equals(branchName) && headCommit != null) {
             BiConsumer<String, String> cb = kalynxReviewsUpdateCallback;
             if (cb != null) {
-                log.info("kalynx-reviews push detected for '{}/{}' — triggering live review reconciliation",
+                LOGGER.info("kalynx-reviews push detected for '{}/{}' — triggering live review reconciliation",
                         owner, repo);
                 cb.accept(owner, repo);
             }
@@ -187,7 +186,7 @@ public final class EventSinkImpl implements EventSink {
 
     private void persistBranchDeleted(ReviewEvent event) throws SQLException, InterruptedException {
         if (branchRepository == null) {
-            log.warn("DB persistence skipped for BRANCH_DELETED '{}': branchRepository not wired",
+            LOGGER.warn("DB persistence skipped for BRANCH_DELETED '{}': branchRepository not wired",
                     event.repository());
             return;
         }
@@ -196,25 +195,25 @@ public final class EventSinkImpl implements EventSink {
         String branchName = event.payload().get("branch_name");
         String url        = event.payload().get("repository_url");
 
-        ensureRepository(owner, repo, url);
+        String repositoryId = ensureRepository(owner, repo, url);
 
-        if (branchName != null) {
-            branchRepository.delete(owner, repo, branchName);
-            log.debug("Branch deleted: {}/{} branch='{}'", owner, repo, branchName);
+        if (branchName != null && repositoryId != null) {
+            branchRepository.delete(repositoryId, branchName);
+            LOGGER.debug("Branch deleted: {}/{} branch='{}'", owner, repo, branchName);
         } else {
-            log.warn("BRANCH_DELETED for '{}' has no branch_name in payload — nothing deleted",
+            LOGGER.warn("BRANCH_DELETED for '{}' has no branch_name in payload — nothing deleted",
                     event.repository());
         }
     }
 
     private void persistReviewEvent(ReviewEvent event) throws SQLException, InterruptedException {
         if (reviewsIndexRepository == null) {
-            log.warn("DB persistence skipped for {} '{}': reviewsIndexRepository not wired",
+            LOGGER.warn("DB persistence skipped for {} '{}': reviewsIndexRepository not wired",
                     event.eventType(), event.reviewId());
             return;
         }
         if (event.reviewId() == null) {
-            log.warn("Skipping reviews_index upsert for {} event — reviewId is null",
+            LOGGER.warn("Skipping reviews_index upsert for {} event — reviewId is null",
                     event.eventType());
             return;
         }
@@ -222,7 +221,7 @@ public final class EventSinkImpl implements EventSink {
         String owner = parts[0], repo = parts[1];
         String url = resolveRepoUrl(owner, repo);
         if (url == null) {
-            log.warn("No URL found in repositories table for {}/{} — review '{}' will be stored " +
+            LOGGER.warn("No URL found in repositories table for {}/{} — review '{}' will be stored " +
                      "without repository_url; register the repo via POST /repositories to fix this",
                     owner, repo, event.reviewId());
         }
@@ -234,17 +233,18 @@ public final class EventSinkImpl implements EventSink {
         reviewsIndexRepository.upsert(
                 event.reviewId(), status, event.timestamp(),
                 ReviewsIndexMapper.toRepositoriesJson(entries));
-        log.debug("Review upserted in reviews_index: id='{}' repo='{}/{}' url='{}'",
+        LOGGER.debug("Review upserted in reviews_index: id='{}' repo='{}/{}' url='{}'",
                 event.reviewId(), owner, repo, url);
     }
 
     // -------------------------------------------------------------------------
 
-    private void ensureRepository(String owner, String repo, String url)
+    private String ensureRepository(String owner, String repo, String url)
             throws SQLException, InterruptedException {
-        if (repositoriesRepository == null || url == null) return;
-        repositoriesRepository.upsert(owner, repo, url);
-        log.debug("Repository upserted: {}/{} url='{}'", owner, repo, url);
+        if (repositoriesRepository == null || url == null) return null;
+        RepositoryRecord record = repositoriesRepository.upsert(owner, repo, url);
+        LOGGER.debug("Repository upserted: {}/{} url='{}'", owner, repo, url);
+        return record.repositoryId();
     }
 
     private String resolveRepoUrl(String owner, String repo) {
@@ -254,7 +254,7 @@ public final class EventSinkImpl implements EventSink {
                     .map(r -> r.url())
                     .orElse(null);
         } catch (Exception e) {
-            log.warn("Could not resolve URL for {}/{}: {}", owner, repo, e.getMessage());
+            LOGGER.warn("Could not resolve URL for {}/{}: {}", owner, repo, e.getMessage());
             return null;
         }
     }

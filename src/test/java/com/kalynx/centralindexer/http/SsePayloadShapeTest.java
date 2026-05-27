@@ -1,7 +1,5 @@
 package com.kalynx.centralindexer.http;
 
-import com.google.gson.Gson;
-import com.kalynx.centralindexer.json.GsonFactory;
 import com.kalynx.centralindexer.model.EventType;
 import com.kalynx.centralindexer.model.ReviewEvent;
 import org.junit.jupiter.api.Test;
@@ -10,138 +8,108 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests asserting the shape and size of SSE event payloads.
- *
- * <p>Ensures that:
- * <ul>
- *   <li>{@code BRANCH_UPDATED} frames include {@code repository_url}, {@code branch_name},
- *       and {@code head_commit} routing keys</li>
- *   <li>{@code BRANCH_DELETED} frames include {@code repository_url} and {@code branch_name}</li>
- *   <li>No representative frame exceeds the 1 KB payload size gate</li>
- * </ul>
+ * Verifies the SSE event name and data shape for comment events.
  */
 class SsePayloadShapeTest {
 
-    private static final int MAX_PAYLOAD_BYTES = 1024;
-    private final Gson gson = GsonFactory.getInstance();
+    private final SseHandler handler = new SseHandler(null, null);
+
+    // ── toSseName ────────────────────────────────────────────────────────────
 
     @Test
-    void branchUpdatedPayloadContainsRepositoryUrl() {
-        String json = serializeEvent(branchUpdatedEvent());
-        assertTrue(json.contains("\"repository_url\""),
-                "BRANCH_UPDATED must include repository_url");
-    }
-
-    @Test
-    void branchUpdatedPayloadContainsBranchName() {
-        String json = serializeEvent(branchUpdatedEvent());
-        assertTrue(json.contains("\"branch_name\""),
-                "BRANCH_UPDATED must include branch_name");
+    void toSseName_reviewCommentAdded_mapsToCommentAdded() {
+        assertEquals("comment.added", SseHandler.toSseName(EventType.REVIEW_COMMENT_ADDED));
     }
 
     @Test
-    void branchUpdatedPayloadContainsHeadCommit() {
-        String json = serializeEvent(branchUpdatedEvent());
-        assertTrue(json.contains("\"head_commit\""),
-                "BRANCH_UPDATED must include head_commit");
+    void toSseName_reviewCommentUpdated_mapsToCommentUpdated() {
+        assertEquals("comment.updated", SseHandler.toSseName(EventType.REVIEW_COMMENT_UPDATED));
     }
 
     @Test
-    void branchDeletedPayloadContainsRepositoryUrl() {
-        String json = serializeEvent(branchDeletedEvent());
-        assertTrue(json.contains("\"repository_url\""),
-                "BRANCH_DELETED must include repository_url");
+    void toSseName_reviewCreated_returnsEnumName() {
+        assertEquals("REVIEW_CREATED", SseHandler.toSseName(EventType.REVIEW_CREATED));
     }
 
     @Test
-    void branchDeletedPayloadContainsBranchName() {
-        String json = serializeEvent(branchDeletedEvent());
-        assertTrue(json.contains("\"branch_name\""),
-                "BRANCH_DELETED must include branch_name");
+    void toSseName_reviewUpdated_returnsEnumName() {
+        assertEquals("REVIEW_UPDATED", SseHandler.toSseName(EventType.REVIEW_UPDATED));
     }
 
     @Test
-    void branchUpdatedSseFrameUnder1KB() {
-        String frame = buildSseFrame(branchUpdatedEvent());
-        int bytes = frame.getBytes(StandardCharsets.UTF_8).length;
-        assertTrue(bytes < MAX_PAYLOAD_BYTES,
-                "BRANCH_UPDATED SSE frame must be < 1 KB but was " + bytes + " bytes");
+    void toSseName_branchUpdated_returnsEnumName() {
+        assertEquals("BRANCH_UPDATED", SseHandler.toSseName(EventType.BRANCH_UPDATED));
+    }
+
+    // ── toSseData for comment events ─────────────────────────────────────────
+
+    @Test
+    void toSseData_commentAdded_payloadContainsType() {
+        String data = handler.toSseData(buildCommentEvent(EventType.REVIEW_COMMENT_ADDED, "rev-abc",
+                "https://git.example.com/r.git", "comment-uuid-001"));
+        assertTrue(data.contains("\"type\":\"comment.added\""), "Payload must contain type");
     }
 
     @Test
-    void branchDeletedSseFrameUnder1KB() {
-        String frame = buildSseFrame(branchDeletedEvent());
-        int bytes = frame.getBytes(StandardCharsets.UTF_8).length;
-        assertTrue(bytes < MAX_PAYLOAD_BYTES,
-                "BRANCH_DELETED SSE frame must be < 1 KB but was " + bytes + " bytes");
+    void toSseData_commentAdded_payloadContainsReviewId() {
+        String data = handler.toSseData(buildCommentEvent(EventType.REVIEW_COMMENT_ADDED, "rev-abc",
+                "https://git.example.com/r.git", "comment-uuid-001"));
+        assertTrue(data.contains("\"review_id\":\"rev-abc\""), "Payload must contain review_id");
     }
 
     @Test
-    void reviewCreatedSseFrameUnder1KB() {
-        String frame = buildSseFrame(reviewEvent(EventType.REVIEW_CREATED));
-        int bytes = frame.getBytes(StandardCharsets.UTF_8).length;
-        assertTrue(bytes < MAX_PAYLOAD_BYTES,
-                "REVIEW_CREATED SSE frame must be < 1 KB but was " + bytes + " bytes");
+    void toSseData_commentAdded_payloadContainsCommentId() {
+        String data = handler.toSseData(buildCommentEvent(EventType.REVIEW_COMMENT_ADDED, "rev-abc",
+                "https://git.example.com/r.git", "comment-uuid-001"));
+        assertTrue(data.contains("\"comment_id\":\"comment-uuid-001\""), "Payload must contain comment_id");
     }
 
     @Test
-    void reviewUpdatedSseFrameUnder1KB() {
-        String frame = buildSseFrame(reviewEvent(EventType.REVIEW_UPDATED));
-        int bytes = frame.getBytes(StandardCharsets.UTF_8).length;
-        assertTrue(bytes < MAX_PAYLOAD_BYTES,
-                "REVIEW_UPDATED SSE frame must be < 1 KB but was " + bytes + " bytes");
+    void toSseData_commentAdded_payloadContainsRepositoryUrl() {
+        String data = handler.toSseData(buildCommentEvent(EventType.REVIEW_COMMENT_ADDED, "rev-abc",
+                "https://git.example.com/r.git", "comment-uuid-001"));
+        assertTrue(data.contains("\"repository_url\":\"https://git.example.com/r.git\""),
+                "Payload must contain repository_url");
     }
 
-    private ReviewEvent branchUpdatedEvent() {
-        return new ReviewEvent(
-                0L,
-                Instant.parse("2026-05-20T10:00:00Z"),
-                "alice/repo",
-                EventType.BRANCH_UPDATED,
-                null,
-                "alice",
-                "delivery-abc123",
-                Map.of(
-                        "repository_url", "https://github.com/alice/repo.git",
-                        "branch_name", "feature/new-thing",
-                        "head_commit", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"));
+    @Test
+    void toSseData_commentUpdated_payloadContainsType() {
+        String data = handler.toSseData(buildCommentEvent(EventType.REVIEW_COMMENT_UPDATED, "rev-xyz",
+                "https://git.example.com/r.git", "comment-uuid-002"));
+        assertTrue(data.contains("\"type\":\"comment.updated\""), "Payload must contain type");
     }
 
-    private ReviewEvent branchDeletedEvent() {
-        return new ReviewEvent(
-                0L,
-                Instant.parse("2026-05-20T10:00:00Z"),
-                "alice/repo",
-                EventType.BRANCH_DELETED,
-                null,
-                "alice",
-                "delivery-def456",
-                Map.of(
-                        "repository_url", "https://github.com/alice/repo.git",
-                        "branch_name", "feature/old-thing"));
+    @Test
+    void toSseData_commentEvent_payloadUnder1KB() {
+        String data = handler.toSseData(buildCommentEvent(
+                EventType.REVIEW_COMMENT_ADDED,
+                "rev-" + "a".repeat(50),
+                "https://git.example.com/" + "x".repeat(100) + ".git",
+                "comment-uuid-" + "0".repeat(36)));
+        assertTrue(data.getBytes(StandardCharsets.UTF_8).length < 1024,
+                "Comment SSE payload must be under 1 KB");
     }
 
-    private ReviewEvent reviewEvent(EventType type) {
-        return new ReviewEvent(
-                0L,
-                Instant.parse("2026-05-20T10:00:00Z"),
-                "alice/repo",
-                type,
-                "review-xyz-789",
-                "alice",
-                "delivery-ghi789",
-                Map.of());
+    // ── non-comment events still serialize as full ReviewEvent JSON ──────────
+
+    @Test
+    void toSseData_reviewCreated_containsEventType() {
+        ReviewEvent event = new ReviewEvent(1L, Instant.parse("2026-05-26T10:00:00Z"),
+                "alice/repo", EventType.REVIEW_CREATED, "rev-1", null, null, Map.of());
+        String data = handler.toSseData(event);
+        assertTrue(data.contains("REVIEW_CREATED"), "Full event JSON must contain eventType");
     }
 
-    private String serializeEvent(ReviewEvent event) {
-        return gson.toJson(event);
-    }
+    // ── helpers ───────────────────────────────────────────────────────────────
 
-    private String buildSseFrame(ReviewEvent event) {
-        return "event: " + event.eventType().name() + "\n"
-                + "data: " + gson.toJson(event) + "\n\n";
+    private static ReviewEvent buildCommentEvent(EventType type, String reviewId,
+                                                  String repoUrl, String commentId) {
+        return new ReviewEvent(0L, Instant.parse("2026-05-26T10:00:00Z"),
+                "alice/repo", type, reviewId, null, null,
+                Map.of("repository_url", repoUrl, "comment_id", commentId));
     }
 }

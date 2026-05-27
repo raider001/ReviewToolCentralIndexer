@@ -1,5 +1,6 @@
 package com.kalynx.centralindexer.provider.gitlab;
 
+import com.kalynx.centralindexer.metrics.MetricsCollector;
 import com.kalynx.centralindexer.spi.EventSink;
 import com.kalynx.centralindexer.spi.ProviderConfig;
 import com.kalynx.centralindexer.spi.ProviderPlugin;
@@ -29,9 +30,16 @@ public final class GitLabPlugin implements ProviderPlugin {
 
     /**
      * Creates a {@code GitLabPlugin} with the default HTTP-based reconciler.
+     *
+     * @param metrics the metrics collector for API call tracking; may be {@code null}
      */
+    public GitLabPlugin(MetricsCollector metrics) {
+        this.reconciler = new GitLabReconciler(metrics);
+    }
+
+    /** No-arg constructor for external plugin JAR loading via {@link java.util.ServiceLoader}. */
     public GitLabPlugin() {
-        this.reconciler = new GitLabReconciler();
+        this(null);
     }
 
     @Override

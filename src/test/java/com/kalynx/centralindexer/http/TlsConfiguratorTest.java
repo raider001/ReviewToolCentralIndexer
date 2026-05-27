@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class TlsConfiguratorTest {
 
     @Test
-    void plainHttpWhenTlsDisabled() throws Exception {
+    void createServer_tlsDisabled_returnsPlainHttpServer() throws Exception {
         TlsConfig tls = tlsConfig(false, "/some/path", "password", "PKCS12");
         HttpServer server = TlsConfigurator.createServer(0, tls);
         try {
@@ -31,7 +31,7 @@ class TlsConfiguratorTest {
     }
 
     @Test
-    void plainHttpWhenTlsBlockAbsent() throws Exception {
+    void createServer_nullTlsConfig_returnsPlainHttpServer() throws Exception {
         HttpServer server = TlsConfigurator.createServer(0, null);
         try {
             assertFalse(server instanceof HttpsServer,
@@ -42,7 +42,7 @@ class TlsConfiguratorTest {
     }
 
     @Test
-    void httpsServerWhenTlsEnabled() throws Exception {
+    void createServer_tlsEnabled_returnsHttpsServer() throws Exception {
         try (TestKeystore ks = new TestKeystore()) {
             TlsConfig tls = tlsConfig(true, ks.getKeystorePath(), ks.getPassword(), ks.getKeystoreType());
             HttpServer server = TlsConfigurator.createServer(0, tls);
@@ -61,7 +61,7 @@ class TlsConfiguratorTest {
     }
 
     @Test
-    void throwsOnMissingKeystoreFile() {
+    void createServer_missingKeystore_throwsTlsConfigurationException() {
         String missingPath = "/nonexistent/path/test-keystore.p12";
         TlsConfig tls = tlsConfig(true, missingPath, "password", "PKCS12");
         TlsConfigurationException ex = assertThrows(TlsConfigurationException.class,
@@ -71,7 +71,7 @@ class TlsConfiguratorTest {
     }
 
     @Test
-    void throwsOnWrongKeystorePassword() throws Exception {
+    void createServer_wrongPassword_throwsTlsConfigurationException() throws Exception {
         try (TestKeystore ks = new TestKeystore()) {
             TlsConfig tls = tlsConfig(true, ks.getKeystorePath(), "wrong-password-xyz", ks.getKeystoreType());
             assertThrows(TlsConfigurationException.class,

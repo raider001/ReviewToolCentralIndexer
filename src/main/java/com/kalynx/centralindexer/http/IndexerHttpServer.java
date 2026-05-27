@@ -2,6 +2,7 @@ package com.kalynx.centralindexer.http;
 
 import com.kalynx.centralindexer.config.AppConfig;
 import com.kalynx.centralindexer.db.BranchRepository;
+import com.kalynx.centralindexer.db.CommentsIndexRepository;
 import com.kalynx.centralindexer.db.ConnectionPool;
 import com.kalynx.centralindexer.db.RepositoriesRepository;
 import com.kalynx.centralindexer.db.ReviewsIndexRepository;
@@ -26,6 +27,7 @@ import java.util.concurrent.Executors;
  *   <li>{@code /events/stream} — live SSE stream, guarded by {@link AuthFilter}</li>
  *   <li>{@code /branches} — branch typeahead, guarded by {@link AuthFilter}</li>
  *   <li>{@code /reviews} — review index query, guarded by {@link AuthFilter}</li>
+ *   <li>{@code /reviews/} — per-review sub-resources (comments), guarded by {@link AuthFilter}</li>
  *   <li>{@code /repositories} — repository registration, guarded by {@link AuthFilter}</li>
  * </ul>
  *
@@ -42,7 +44,7 @@ public final class IndexerHttpServer {
      */
     public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
                              PublisherRegistry registry) throws IOException {
-        this(config, pool, router, registry, null, null, null, new MetricsCollector(pool));
+        this(config, pool, router, registry, null, null, null, new MetricsCollector(pool), null);
     }
 
     /**
@@ -51,7 +53,7 @@ public final class IndexerHttpServer {
     public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
                              PublisherRegistry registry, BranchRepository branchRepository)
             throws IOException {
-        this(config, pool, router, registry, branchRepository, null, null, new MetricsCollector(pool));
+        this(config, pool, router, registry, branchRepository, null, null, new MetricsCollector(pool), null);
     }
 
     /**
@@ -62,7 +64,7 @@ public final class IndexerHttpServer {
                              ReviewsIndexRepository reviewsRepository)
             throws IOException {
         this(config, pool, router, registry, branchRepository, reviewsRepository, null,
-                new MetricsCollector(pool));
+                new MetricsCollector(pool), null);
     }
 
     /**
@@ -75,7 +77,20 @@ public final class IndexerHttpServer {
                              RepositoriesRepository repositoriesRepository)
             throws IOException {
         this(config, pool, router, registry, branchRepository, reviewsRepository,
-                repositoriesRepository, new MetricsCollector(pool));
+                repositoriesRepository, new MetricsCollector(pool), null);
+    }
+
+    /**
+     * Convenience overload without {@code /reviews/} sub-resource context.
+     */
+    public IndexerHttpServer(AppConfig config, ConnectionPool pool, WebhookRouterImpl router,
+                             PublisherRegistry registry, BranchRepository branchRepository,
+                             ReviewsIndexRepository reviewsRepository,
+                             RepositoriesRepository repositoriesRepository,
+                             MetricsCollector metrics)
+            throws IOException {
+        this(config, pool, router, registry, branchRepository, reviewsRepository,
+                repositoriesRepository, metrics, null);
     }
 
     /**
@@ -94,6 +109,8 @@ public final class IndexerHttpServer {
      * @param repositoriesRepository   the repositories repository; may be {@code null} to skip
      *                                 registering the {@code /repositories} endpoint
      * @param metrics                  the metrics collector shared with the GUI (if running)
+     * @param commentsIndexRepository  the comments index repository; may be {@code null} to skip
+     *                                 registering the {@code /reviews/} sub-resource endpoint
      * @throws IOException               if the server socket cannot be bound
      * @throws TlsConfigurationException if TLS is enabled and the keystore cannot be loaded
      */
@@ -101,12 +118,13 @@ public final class IndexerHttpServer {
                              PublisherRegistry registry, BranchRepository branchRepository,
                              ReviewsIndexRepository reviewsRepository,
                              RepositoriesRepository repositoriesRepository,
-                             MetricsCollector metrics)
+                             MetricsCollector metrics,
+                             CommentsIndexRepository commentsIndexRepository)
             throws IOException {
         server = createServer(config);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         registerHandlers(config, pool, router, registry, branchRepository, reviewsRepository,
-                repositoriesRepository, metrics);
+                repositoriesRepository, metrics, commentsIndexRepository);
     }
 
     /**
@@ -144,9 +162,10 @@ public final class IndexerHttpServer {
                                   PublisherRegistry registry, BranchRepository branchRepository,
                                   ReviewsIndexRepository reviewsRepository,
                                   RepositoriesRepository repositoriesRepository,
-                                  MetricsCollector metrics) {
-        server.createContext("/health",   new HealthHandler(pool));
-        server.createContext("/webhooks/", new WebhookDispatcher(router));
+                                  MetricsCollector metrics,
+                                  CommentsIndexRepository commentsIndexRepository) {
+        server.createContext("/health",    new HealthHandler(pool));
+        server.createContext("/webhooks/", new WebhookDispatcher(router, metrics));
         server.createContext("/metrics",   new MetricsHandler(metrics));
         if (registry != null) {
             server.createContext("/events/stream",
@@ -154,15 +173,28 @@ public final class IndexerHttpServer {
         }
         if (branchRepository != null) {
             server.createContext("/branches",
-                    new AuthFilter(config.getAuth(), new BranchesHandler(branchRepository, metrics)));
+                    tracked(new AuthFilter(config.getAuth(), new BranchesHandler(branchRepository, metrics)), metrics, "branches"));
         }
         if (reviewsRepository != null) {
             server.createContext("/reviews",
-                    new AuthFilter(config.getAuth(), new ReviewsHandler(reviewsRepository, metrics)));
+                    tracked(new AuthFilter(config.getAuth(), new ReviewsHandler(reviewsRepository, metrics)), metrics, "reviews"));
+        }
+        if (commentsIndexRepository != null) {
+            server.createContext("/reviews/",
+                    tracked(new AuthFilter(config.getAuth(), new CommentsHandler(commentsIndexRepository)), metrics, "comments"));
         }
         if (repositoriesRepository != null) {
             server.createContext("/repositories",
-                    new AuthFilter(config.getAuth(), new RepositoriesHandler(repositoriesRepository)));
+                    tracked(new AuthFilter(config.getAuth(), new RepositoriesHandler(repositoriesRepository)), metrics, "repositories"));
         }
+    }
+
+    private static com.sun.net.httpserver.HttpHandler tracked(
+            com.sun.net.httpserver.HttpHandler h, MetricsCollector metrics, String endpoint) {
+        if (metrics == null) return h;
+        return exchange -> {
+            metrics.recordRestCall(endpoint);
+            h.handle(exchange);
+        };
     }
 }

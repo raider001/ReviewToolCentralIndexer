@@ -37,7 +37,7 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
-    void cloudNotesRefEmitsReviewCreated() throws Exception {
+    void handle_cloudNotesRef_emitsReviewCreated() throws Exception {
         String repo = "owner/my-repo";
         byte[] body = buildCloudPushBody(repo,
                 "refs/notes/reviews/rev-bb-001/metadata/title", false);
@@ -49,7 +49,7 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
-    void cloudBranchRefEmitsBranchUpdated() throws Exception {
+    void handle_cloudBranchRef_emitsBranchUpdated() throws Exception {
         byte[] body = buildCloudPushBody("owner/my-repo", "refs/heads/main", false);
         handler.handle(buildHeaders(body, "repo:push", "uuid-2"), body);
 
@@ -58,7 +58,7 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
-    void cloudBranchDeletedEmitsBranchDeleted() throws Exception {
+    void handle_cloudBranchDeleted_emitsBranchDeleted() throws Exception {
         byte[] body = buildCloudPushBodyDeleted("owner/my-repo", "refs/heads/old-branch");
         handler.handle(buildHeaders(body, "repo:push", "uuid-3"), body);
 
@@ -67,7 +67,7 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
-    void dataCenterNotesRefEmitsReviewUpdated() throws Exception {
+    void handle_dataCenterNotesRef_emitsReviewUpdated() throws Exception {
         byte[] body = buildDataCenterPushBody("my-repo",
                 "refs/notes/reviews/rev-dc-001/metadata/status", false);
         handler.handle(buildHeaders(body, "repo:refs_changed", "uuid-dc-1"), body);
@@ -77,7 +77,7 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
-    void invalidSignatureDiscards() throws Exception {
+    void handle_invalidSignature_discardsEvent() throws Exception {
         byte[] body = buildCloudPushBody("owner/repo",
                 "refs/notes/reviews/rev-x/metadata/title", false);
         Map<String, String> headers = Map.of(
@@ -89,7 +89,7 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
-    void nonPushEventDiscards() {
+    void handle_nonPushEvent_discardsEvent() {
         byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
         handler.handle(Map.of("x-event-key", "pr:opened"), body);
         assertTrue(submitted.isEmpty());

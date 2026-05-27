@@ -39,27 +39,38 @@ import java.util.Map;
  */
 public final class GitHubReconciler extends AbstractGithubReconciler {
 
-    private static final Logger log = LoggerFactory.getLogger(GitHubReconciler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(GitHubReconciler.class);
 
     private final HttpClient http;
+    private final MetricsCollector metrics;
 
     /**
      * Creates a reconciler using the JDK default HTTP client.
+     *
+     * @param metrics the metrics collector for API call tracking; may be {@code null}
      */
-    public GitHubReconciler() {
+    public GitHubReconciler(MetricsCollector metrics) {
         this.http = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
+        this.metrics = metrics;
+    }
+
+    /** No-arg constructor for tests and external SPI loading. */
+    public GitHubReconciler() {
+        this((MetricsCollector) null);
     }
 
     /**
      * Creates a reconciler with an injected HTTP client (for testing).
      *
-     * @param http the HTTP client to use for GitHub API requests
+     * @param http    the HTTP client to use for GitHub API requests
+     * @param metrics the metrics collector; may be {@code null}
      */
-    GitHubReconciler(HttpClient http) {
+    GitHubReconciler(HttpClient http, MetricsCollector metrics) {
         this.http = http;
+        this.metrics = metrics;
     }
 
     /**
@@ -72,9 +83,9 @@ public final class GitHubReconciler extends AbstractGithubReconciler {
      * @param sink       the event sink to receive back-filled events
      */
     public void reconcile(String repository, Instant since, ProviderConfig config, EventSink sink) {
-        String token = config.properties().get("apiToken");
-        if (token == null || token.isBlank()) {
-            log.warn("No apiToken configured for GitHub; skipping reconciliation of {}", repository);
+        String token = config.properties().get(GitHubConstants.PROP_API_TOKEN);
+        if (GitHubConstants.isTokenMissing(token)) {
+            LOGGER.warn("No apiToken configured for GitHub; skipping reconciliation of {}", repository);
             return;
         }
 
@@ -125,7 +136,7 @@ public final class GitHubReconciler extends AbstractGithubReconciler {
         try {
             sink.submit(reviewEvent);
         } catch (RuntimeException e) {
-            log.warn("Failed to submit reconciled GitHub event for {}: {}",
+            LOGGER.warn("Failed to submit reconciled GitHub event for {}: {}",
                     repository, e.getMessage());
         }
     }
@@ -134,17 +145,16 @@ public final class GitHubReconciler extends AbstractGithubReconciler {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .header("Authorization", "Bearer " + token)
-                    .header("Accept", "application/vnd.github+json")
-                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .header("Authorization", GitHubConstants.BEARER_PREFIX + token)
+                    .header("Accept", GitHubConstants.ACCEPT_HEADER)
+                    .header(GitHubConstants.API_VERSION_HEADER, GitHubConstants.API_VERSION)
                     .GET()
                     .build();
             HttpResponse<String> response = http.send(request,
                     HttpResponse.BodyHandlers.ofString());
-            MetricsCollector mc = MetricsCollector.getInstance();
-            if (mc != null) mc.recordProviderApiCall();
+            if (metrics != null) metrics.recordProviderApiCall();
             if (response.statusCode() != 200) {
-                log.warn("GitHub Events API returned {} for {}", response.statusCode(), url);
+                LOGGER.warn("GitHub Events API returned {} for {}", response.statusCode(), url);
                 return null;
             }
             return response.body();
@@ -152,8 +162,8 @@ public final class GitHubReconciler extends AbstractGithubReconciler {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.warn("Error fetching GitHub events from {}: {} — {}", url, e.getClass().getSimpleName(), e.getMessage());
-            log.debug("Full exception for {}", url, e);
+            LOGGER.warn("Error fetching GitHub events from {}: {} — {}", url, e.getClass().getSimpleName(), e.getMessage());
+            LOGGER.debug("Full exception for {}", url, e);
             return null;
         }
     }
