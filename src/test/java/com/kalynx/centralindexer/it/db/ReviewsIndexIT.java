@@ -42,7 +42,7 @@ class ReviewsIndexIT {
     }
 
     @Test
-    void upsertStoresRepositoriesJson() throws Exception {
+    void upsert_withRepositoriesJson_storesJsonCorrectly() throws Exception {
         ReviewsIndexRepository repo = new ReviewsIndexRepository(pool);
 
         List<ReviewsIndexMapper.RepoEntry> entries = List.of(

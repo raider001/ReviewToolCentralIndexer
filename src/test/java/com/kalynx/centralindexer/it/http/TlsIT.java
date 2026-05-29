@@ -72,7 +72,7 @@ class TlsIT {
     }
 
     @Test
-    void healthEndpointReachableOverHttps() throws Exception {
+    void healthEndpoint_tlsEnabled_reachableOverHttps() throws Exception {
         HttpsURLConnection conn = openHttps("/health");
         conn.connect();
         assertEquals(200, conn.getResponseCode(),
@@ -86,7 +86,7 @@ class TlsIT {
     }
 
     @Test
-    void sseStreamReachableOverHttps() throws Exception {
+    void sseStream_tlsEnabled_reachableOverHttps() throws Exception {
         String repo = "owner/tls-sse-test";
 
         HttpsURLConnection conn = openHttps("/events/stream?repository=" + repo);

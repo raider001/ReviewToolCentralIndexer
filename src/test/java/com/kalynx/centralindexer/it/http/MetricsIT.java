@@ -46,20 +46,20 @@ class MetricsIT {
     }
 
     @Test
-    void getMetricsReturns200() throws Exception {
+    void getMetrics_validRequest_returns200() throws Exception {
         HttpURLConnection conn = get("/metrics");
         assertEquals(200, conn.getResponseCode());
     }
 
     @Test
-    void contentTypeIsJson() throws Exception {
+    void getMetrics_validRequest_contentTypeIsJson() throws Exception {
         HttpURLConnection conn = get("/metrics");
         conn.getResponseCode();
         assertEquals("application/json", conn.getHeaderField("Content-Type"));
     }
 
     @Test
-    void responseBodyContainsTopLevelKeys() throws Exception {
+    void getMetrics_validRequest_responseContainsTopLevelKeys() throws Exception {
         HttpURLConnection conn = get("/metrics");
         String body = readBody(conn);
 
@@ -70,7 +70,7 @@ class MetricsIT {
     }
 
     @Test
-    void responseBodyContainsSseSubKeys() throws Exception {
+    void getMetrics_validRequest_responseContainsSseSubKeys() throws Exception {
         HttpURLConnection conn = get("/metrics");
         String body = readBody(conn);
 
@@ -80,7 +80,7 @@ class MetricsIT {
     }
 
     @Test
-    void responseBodyContainsDbSubKeys() throws Exception {
+    void getMetrics_validRequest_responseContainsDbSubKeys() throws Exception {
         HttpURLConnection conn = get("/metrics");
         String body = readBody(conn);
 
@@ -90,7 +90,7 @@ class MetricsIT {
     }
 
     @Test
-    void postReturns405() throws Exception {
+    void postMetrics_postMethod_returns405() throws Exception {
         URL url = new URL("http://localhost:" + server.getPort() + "/metrics");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");

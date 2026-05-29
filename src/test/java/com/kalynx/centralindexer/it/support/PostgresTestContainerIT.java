@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PostgresTestContainerIT {
 
     @Test
-    void containerStartsAndAcceptsConnections() throws Exception {
+    void containerStarts_dockerAvailable_acceptsConnections() throws Exception {
         try (PostgresTestContainer container = new PostgresTestContainer()) {
             Connection conn = DriverManager.getConnection(
                     container.getJdbcUrl(), container.getUser(), container.getPassword());
@@ -35,7 +35,7 @@ class PostgresTestContainerIT {
     }
 
     @Test
-    void closeStopsContainer() throws Exception {
+    void close_runningContainer_stopsContainer() throws Exception {
         String containerId;
         try (PostgresTestContainer container = new PostgresTestContainer()) {
             containerId = extractContainerId(container);

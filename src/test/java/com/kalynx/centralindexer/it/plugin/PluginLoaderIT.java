@@ -27,7 +27,7 @@ class PluginLoaderIT {
     @TempDir
     Path tempDir;
     @Test
-    void loadsRealPluginFromJarFile() throws Exception {
+    void load_realJarFile_returnsPluginWithCorrectProviderId() throws Exception {
         Path pluginsDir = buildMinimalPluginJar("test-provider", tempDir);
         AppConfig config = buildConfig("test-provider", pluginsDir.toString());
         PluginLoader loader = new PluginLoader(config);

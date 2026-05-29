@@ -82,7 +82,7 @@ class LiveStreamIT {
     }
 
     @Test
-    void multipleClientsForSameRepoAllReceiveEvent() throws Exception {
+    void submit_multipleClientsConnected_allReceiveEvent() throws Exception {
         BlockingQueue<String> client1 = connectSse("owner/multi-client");
         BlockingQueue<String> client2 = connectSse("owner/multi-client");
         BlockingQueue<String> client3 = connectSse("owner/multi-client");
@@ -94,7 +94,7 @@ class LiveStreamIT {
     }
 
     @Test
-    void branchUpdatedEventDeliversSseFrameWithRoutingKeys() throws Exception {
+    void submit_branchUpdatedEvent_sseFrameContainsRoutingKeys() throws Exception {
         BlockingQueue<String> lines = connectSse("owner/routing-repo");
         Thread.sleep(300);
         sink.submit(new ReviewEvent(
@@ -112,7 +112,7 @@ class LiveStreamIT {
     }
 
     @Test
-    void clientForDifferentRepoDoesNotReceiveEvent() throws Exception {
+    void submit_eventForDifferentRepo_clientDoesNotReceive() throws Exception {
         BlockingQueue<String> clientA = connectSse("owner/repo-a");
         Thread.sleep(300);
         sink.submit(testEvent("owner/repo-b", "delivery-diff-1"));

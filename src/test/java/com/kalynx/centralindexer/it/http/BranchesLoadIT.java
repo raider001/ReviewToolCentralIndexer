@@ -79,7 +79,7 @@ class BranchesLoadIT {
     }
 
     @Test
-    void p95LatencyUnder200msFor50ConcurrentTypeaheadRequests() throws Exception {
+    void getBranches_50ConcurrentClients_p95LatencyUnder200ms() throws Exception {
         String url = "http://localhost:" + server.getPort() + "/branches?q=branch-";
         CopyOnWriteArrayList<Long> latenciesMs = new CopyOnWriteArrayList<>();
         CopyOnWriteArrayList<Integer> statusCodes = new CopyOnWriteArrayList<>();

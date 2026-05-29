@@ -153,7 +153,7 @@ class RepositoriesHandlerTest {
     }
 
     @Test
-    void post_responseContainsRegisteredFields() throws Exception {
+    void post_validBody_responseContainsRegisteredFields() throws Exception {
         when(repo.findAll()).thenReturn(List.of());
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         String requestBody = "{\"owner\":\"org\",\"repository\":\"repo\",\"url\":\"https://git/r.git\"}";

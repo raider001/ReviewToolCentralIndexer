@@ -63,13 +63,13 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void emptyDatabaseReturnsEmptyItemsArray() throws Exception {
+    void getReviews_emptyDatabase_returnsEmptyItemsArray() throws Exception {
         String body = get(null);
         assertTrue(body.contains("\"items\":[]"), "Empty DB must produce items:[]");
     }
 
     @Test
-    void responseIs200WithJsonContentType() throws Exception {
+    void getReviews_validRequest_returns200WithJsonContentType() throws Exception {
         URL url = new URL("http://localhost:" + server.getPort() + "/reviews");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setConnectTimeout(5_000);
@@ -80,14 +80,14 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void seededReviewReturnedWithReviewId() throws Exception {
+    void getReviews_seededReview_returnedWithReviewId() throws Exception {
         reviewsRepo.upsert("rev-e2e-1", "OPEN", Instant.now(), "[]");
         String body = get(null);
         assertTrue(body.contains("\"rev-e2e-1\""), "Response must contain seeded review_id");
     }
 
     @Test
-    void responseContainsRepositoryUrl() throws Exception {
+    void getReviews_repoUrlInRepositoriesJson_includedInResponse() throws Exception {
         String reposJson = ReviewsIndexMapper.toRepositoriesJson(List.of(
                 new ReviewsIndexMapper.RepoEntry("alice", "repo",
                         "https://github.com/alice/repo", "main", "abc123")));
@@ -98,7 +98,7 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void reviewBranchExtractedFromRepositoriesJson() throws Exception {
+    void getReviews_branchInRepositoriesJson_extractedInResponse() throws Exception {
         String reposJson = ReviewsIndexMapper.toRepositoriesJson(List.of(
                 new ReviewsIndexMapper.RepoEntry("alice", "repo",
                         "https://example.com", "feature/e2e-branch", "abc123")));
@@ -109,7 +109,7 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void sinceFilterExcludesOlderReviews() throws Exception {
+    void getReviews_sinceFilter_excludesOlderReviews() throws Exception {
         Instant base = Instant.parse("2026-01-01T00:00:00Z");
         reviewsRepo.upsert("rev-old", "OPEN", base, "[]");
         reviewsRepo.upsert("rev-new", "OPEN", base.plusSeconds(100), "[]");
@@ -120,7 +120,7 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void statusFilterReturnsOnlyMatchingStatus() throws Exception {
+    void getReviews_statusFilter_returnsOnlyMatchingStatus() throws Exception {
         Instant now = Instant.now();
         reviewsRepo.upsert("rev-open", "OPEN", now, "[]");
         reviewsRepo.upsert("rev-approved", "APPROVED", now.plusSeconds(1), "[]");
@@ -131,7 +131,7 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void combinedSinceAndStatusFilter() throws Exception {
+    void getReviews_sinceAndStatusFilter_returnsMatchingReviews() throws Exception {
         Instant base = Instant.parse("2026-03-01T00:00:00Z");
         reviewsRepo.upsert("rev-old-open", "OPEN", base, "[]");
         reviewsRepo.upsert("rev-new-open", "OPEN", base.plusSeconds(20), "[]");
@@ -144,7 +144,7 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void postMethodReturns405() throws Exception {
+    void postReviews_postMethod_returns405() throws Exception {
         URL url = new URL("http://localhost:" + server.getPort() + "/reviews");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
@@ -154,7 +154,7 @@ class ReviewsEndpointIT {
     }
 
     @Test
-    void multipleReviewsAllReturnedWithNoFilter() throws Exception {
+    void getReviews_noFilter_returnsAllReviews() throws Exception {
         Instant now = Instant.now();
         reviewsRepo.upsert("rev-a", "OPEN", now, "[]");
         reviewsRepo.upsert("rev-b", "APPROVED", now.plusSeconds(1), "[]");

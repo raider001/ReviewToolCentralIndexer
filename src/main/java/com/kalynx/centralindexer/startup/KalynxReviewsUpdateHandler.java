@@ -30,8 +30,8 @@ final class KalynxReviewsUpdateHandler implements BiConsumer<String, String> {
                     try {
                         repositoriesRepository.findByOwnerAndRepository(owner, repo)
                                 .ifPresent(record -> {
-                                    reconciler.reconcileKalynxReviews(record);
                                     commentReconciler.processLivePush(record);
+                                    reconciler.reconcileKalynxReviews(record);
                                 });
                     } catch (Exception e) {
                         LOGGER.warn("kalynx-reviews live reconciliation failed for {}/{}: {}",

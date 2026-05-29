@@ -43,7 +43,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void noFiltersReturnsAllReviews() throws Exception {
+    void query_noFilters_returnsAllReviews() throws Exception {
         Instant now = Instant.now();
         repo.upsert("rev-1", "OPEN", now, "[]");
         repo.upsert("rev-2", "APPROVED", now.plusSeconds(1), "[]");
@@ -57,7 +57,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void sinceFilterReturnsOnlyNewerReviews() throws Exception {
+    void query_sinceFilter_returnsOnlyNewerReviews() throws Exception {
         Instant base = Instant.parse("2026-01-01T00:00:00Z");
         repo.upsert("rev-old", "OPEN", base, "[]");
         repo.upsert("rev-new", "OPEN", base.plusSeconds(10), "[]");
@@ -69,7 +69,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void statusFilterReturnsOnlyMatchingReviews() throws Exception {
+    void query_statusFilter_returnsOnlyMatchingReviews() throws Exception {
         Instant now = Instant.now();
         repo.upsert("rev-open", "OPEN", now, "[]");
         repo.upsert("rev-approved", "APPROVED", now.plusSeconds(1), "[]");
@@ -82,7 +82,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void multipleStatusValuesFiltersCorrectly() throws Exception {
+    void query_multipleStatusValues_filtersCorrectly() throws Exception {
         Instant now = Instant.now();
         repo.upsert("rev-open", "OPEN", now, "[]");
         repo.upsert("rev-approved", "APPROVED", now.plusSeconds(1), "[]");
@@ -97,7 +97,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void sinceAndStatusCombinedFilter() throws Exception {
+    void query_sinceAndStatusCombined_returnsMatchingReviews() throws Exception {
         Instant base = Instant.parse("2026-03-01T00:00:00Z");
         repo.upsert("rev-old-open", "OPEN", base, "[]");
         repo.upsert("rev-new-open", "OPEN", base.plusSeconds(20), "[]");
@@ -110,7 +110,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void resultsOrderedByLastUpdatedDescending() throws Exception {
+    void query_noFilters_resultsOrderedByLastUpdatedDescending() throws Exception {
         Instant base = Instant.parse("2026-05-01T00:00:00Z");
         repo.upsert("rev-a", "OPEN", base, "[]");
         repo.upsert("rev-b", "OPEN", base.plusSeconds(5), "[]");
@@ -125,7 +125,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void repositoriesJsonPreserved() throws Exception {
+    void query_withRepositoriesJson_jsonPreservedInResult() throws Exception {
         String reposJson = "[{\"owner\":\"alice\",\"repository\":\"repo\","
                 + "\"repositoryUrl\":\"https://example.com\","
                 + "\"branchName\":\"main\",\"headCommit\":\"abc\"}]";
@@ -138,7 +138,7 @@ class ReviewsIndexRepositoryQueryIT {
     }
 
     @Test
-    void emptyResultWhenNothingMatches() throws Exception {
+    void query_noMatchingStatus_returnsEmpty() throws Exception {
         repo.upsert("rev-1", "OPEN", Instant.now(), "[]");
 
         List<ReviewRecord> results = repo.query(null, List.of("NONEXISTENT_STATUS"));
